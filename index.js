@@ -9,7 +9,8 @@ const {
   ActionRowBuilder, 
   ButtonBuilder, 
   ButtonStyle, 
-  EmbedBuilder 
+  EmbedBuilder,
+  AttachmentBuilder
 } = require('discord.js');
 let cron = null;
 try {
@@ -199,6 +200,156 @@ function detectBadWord(text) {
     if (regex.test(lower)) return word;
   }
   return null;
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Generator Berkas Transkrip HTML Modern (Format Discord Dark Theme)
+function generateHtmlTranscript(channelName, guildName, messages, closedByTag, ownerMention) {
+  const messageRows = messages.map(msg => {
+    const timeStr = new Date(msg.createdTimestamp).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    const authorName = escapeHtml(msg.author?.tag || 'Pengguna Tidak Dikenal');
+    const authorAvatar = msg.author ? msg.author.displayAvatarURL({ extension: 'png', size: 64 }) : 'https://cdn.discordapp.com/embed/avatars/0.png';
+    const content = escapeHtml(msg.content || '');
+    
+    let attachmentsHtml = '';
+    if (msg.attachments && msg.attachments.size > 0) {
+      attachmentsHtml = '<div class="attachments">' + msg.attachments.map(att => {
+        const isImage = /\.(png|jpe?g|gif|webp)$/i.test(att.name || '');
+        if (isImage) {
+          return `<div class="attachment"><a href="${att.url}" target="_blank"><img src="${att.url}" alt="${escapeHtml(att.name)}" style="max-width: 320px; max-height: 240px; border-radius: 6px; margin-top: 6px;" /></a></div>`;
+        }
+        return `<div class="attachment"><a href="${att.url}" target="_blank" style="color: #00a8fc; text-decoration: underline;">📎 ${escapeHtml(att.name || 'Berkas Lampiran')}</a></div>`;
+      }).join('') + '</div>';
+    }
+
+    return `
+      <div class="message">
+        <img class="avatar" src="${authorAvatar}" alt="avatar" />
+        <div class="content-wrapper">
+          <div class="header">
+            <span class="author">${authorName}</span>
+            <span class="timestamp">${timeStr}</span>
+          </div>
+          <div class="text">${content ? content.replace(/\n/g, '<br>') : '<em>[Tidak ada teks / lampiran]</em>'}</div>
+          ${attachmentsHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  return `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Transkrip Tiket - ${escapeHtml(channelName)}</title>
+  <style>
+    body {
+      background-color: #313338;
+      color: #dbdee1;
+      font-family: 'gg sans', 'Whitney', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background-color: #2b2d31;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .header-panel {
+      background-color: #1e1f22;
+      padding: 16px 20px;
+      border-bottom: 2px solid #232428;
+    }
+    .header-panel h1 {
+      margin: 0 0 6px 0;
+      font-size: 20px;
+      color: #f2f3f5;
+    }
+    .header-panel p {
+      margin: 3px 0;
+      font-size: 13px;
+      color: #949ba4;
+    }
+    .messages-list {
+      padding: 16px 20px;
+    }
+    .message {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background-color: #383a40;
+    }
+    .content-wrapper {
+      flex: 1;
+    }
+    .header {
+      margin-bottom: 4px;
+    }
+    .author {
+      font-weight: 600;
+      color: #f2f3f5;
+      font-size: 14px;
+      margin-right: 8px;
+    }
+    .timestamp {
+      font-size: 11px;
+      color: #949ba4;
+    }
+    .text {
+      font-size: 14px;
+      line-height: 1.4;
+      color: #dbdee1;
+      word-break: break-word;
+    }
+    .footer {
+      background-color: #1e1f22;
+      padding: 12px 20px;
+      text-align: center;
+      font-size: 12px;
+      color: #949ba4;
+      border-top: 1px solid #232428;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header-panel">
+      <h1>📑 Transkrip Obrolan Tiket: #${escapeHtml(channelName)}</h1>
+      <p><strong>Server:</strong> ${escapeHtml(guildName)}</p>
+      <p><strong>Pembuat Tiket:</strong> ${escapeHtml(ownerMention)}</p>
+      <p><strong>Ditutup Oleh:</strong> ${escapeHtml(closedByTag)}</p>
+      <p><strong>Total Pesan:</strong> ${messages.length} pesan</p>
+      <p><strong>Waktu Penutupan:</strong> ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB</p>
+    </div>
+    <div class="messages-list">
+      ${messageRows || '<p style="color: #949ba4;">Tidak ada pesan yang dicatat di tiket ini.</p>'}
+    </div>
+    <div class="footer">
+      Transkrip otomatis dibuat oleh Ambanime Official Bot • Sistem Manajemen Tiket Komunitas
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 // ==========================================
@@ -2283,6 +2434,7 @@ client.on('interactionCreate', async (interaction) => {
       const channelOptions = {
         name: channelName,
         type: ChannelType.GuildText,
+        topic: `Pembuat Tiket: ${member.id} | Dibuat: ${new Date().toISOString()}`,
         permissionOverwrites: overwrites,
         reason: `Tiket bantuan untuk ${interaction.user.tag}`
       };
@@ -2328,25 +2480,88 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.customId === 'ticket_close') {
     if (interaction.replied || interaction.deferred) return;
     try {
-      await interaction.reply({ content: '🔒 Tiket ini akan ditutup dan dihapus dalam **5 detik**...' });
-      const channelName = interaction.channel?.name || 'ticket';
-      const logEmbed = new EmbedBuilder()
-        .setTitle('🔒 Tiket Bantuan Ditutup')
-        .setColor(0xED4245)
+      await interaction.reply({ content: '🔒 Menyimpan transkrip dan menutup tiket dalam **5 detik**...' });
+      const channel = interaction.channel;
+      const channelName = channel?.name || 'ticket';
+
+      // Ambil seluruh pesan dalam channel tiket (sampai 100 pesan terakhir)
+      let fetchedMessages = [];
+      try {
+        const msgs = await channel.messages.fetch({ limit: 100 });
+        fetchedMessages = Array.from(msgs.values()).reverse(); // Urutkan secara kronologis
+      } catch (fetchErr) {
+        console.error('Gagal fetch pesan tiket:', fetchErr);
+      }
+
+      // Deteksi ID pembuat tiket dari topic channel atau nama channel
+      const topicMatch = channel?.topic?.match(/Pembuat Tiket:\s*(\d+)/);
+      const ticketOwnerId = topicMatch ? topicMatch[1] : null;
+      const ownerDisplay = ticketOwnerId ? `<@${ticketOwnerId}>` : channelName.replace(/^ticket-/, '@');
+
+      // Daftar partisipan obrolan
+      const participantSet = new Set(fetchedMessages.map(m => `<@${m.author.id}>`));
+      const participants = Array.from(participantSet).slice(0, 10).join(', ') || `<@${interaction.user.id}>`;
+
+      // Buat file transkrip HTML
+      const htmlContent = generateHtmlTranscript(
+        channelName,
+        guild.name,
+        fetchedMessages,
+        interaction.user.tag,
+        ticketOwnerId ? `<@${ticketOwnerId}>` : channelName
+      );
+
+      const transcriptFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
+        name: `transcript-${channelName}.html`
+      });
+
+      const transcriptEmbed = new EmbedBuilder()
+        .setTitle('📑 Transkrip Tiket Bantuan Ditutup')
+        .setColor(0x5865F2)
         .addFields(
+          { name: 'Nama Tiket', value: `\`${channelName}\``, inline: true },
+          { name: 'Pembuat Tiket', value: ownerDisplay, inline: true },
           { name: 'Ditutup Oleh', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
-          { name: 'Nama Channel', value: channelName, inline: true }
+          { name: 'Total Pesan', value: `**${fetchedMessages.length}** pesan`, inline: true },
+          { name: 'Partisipan', value: participants },
+          { name: 'Waktu Ditutup', value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
         )
+        .setFooter({ text: 'Ambanime Ticket System • Transkrip Tersimpan' })
         .setTimestamp();
 
-      await sendAuditLog(guild, logEmbed);
+      // Cari channel #transcript-log yang ada di server
+      const transcriptLogChannel = guild.channels.cache.find(c => 
+        c.isTextBased() && (c.name.toLowerCase().includes('transcript-log') || c.name.toLowerCase().includes('transcript'))
+      ) || guild.channels.cache.find(c => c.isTextBased() && c.name.toLowerCase() === LOG_CHANNEL_NAME);
+
+      if (transcriptLogChannel) {
+        await transcriptLogChannel.send({
+          embeds: [transcriptEmbed],
+          files: [transcriptFile]
+        }).catch(e => console.error('Gagal kirim transkrip ke transcript-log:', e));
+      }
+
+      // Kirim salinan transkrip ke DM pembuat tiket jika memungkinkan
+      if (ticketOwnerId) {
+        try {
+          const ownerUser = await client.users.fetch(ticketOwnerId).catch(() => null);
+          if (ownerUser) {
+            await ownerUser.send({
+              content: `Halo <@${ticketOwnerId}>! Tiket bantuan Anda (**#${channelName}**) telah selesai dan ditutup oleh staf. Berikut adalah salinan berkas transkrip obrolan Anda:`,
+              embeds: [transcriptEmbed],
+              files: [transcriptFile]
+            }).catch(() => {});
+          }
+        } catch (e) {}
+      }
+
       recordModStat(interaction.user.id, 'ticket');
 
       setTimeout(() => {
         if (interaction.channel) interaction.channel.delete().catch(() => {});
       }, 5000);
     } catch (err) {
-      console.error(err);
+      console.error('Error saat menutup tiket:', err);
     }
     return;
   }
