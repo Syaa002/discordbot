@@ -1,80 +1,75 @@
-# 🤖 Discord Moderation, Voice & Staf Utility Bot
+# 🤖 Ambanime Custom Bot — Master Documentation
 
-Bot kustom Discord yang dirancang khusus untuk memenuhi kebutuhan unik internal Staf & Moderator server komunitas (tanpa menduplikasi fitur bot publik umum seperti leveling atau musik).
+Bot kustom Discord all-in-one yang dirancang secara khusus untuk memenuhi kebutuhan unik internal Komunitas & Staf AMBANIME (di luar fungsi bot publik biasa).
 
 Prefix Perintah: **`.`** (Titik) — *juga otomatis merespons prefix `!`*
 
 ---
 
-## 🌟 Kategori Fitur Utama
+## 🌟 Ringkasan 6 Kategori Fitur Master
 
-### 1. 📁 Pemisahan Channel Logging (Audit Trail Khusus)
-- **🗑️ Pesan Dihapus (`#delete-message`)**: Seluruh riwayat pesan yang dihapus (beserta nama pengirim, channel, teks, dan lampiran foto/file) otomatis dicatat di channel khusus **`#delete-message`**.
-- **📜 Log Audit Umum (`#admin-logs`)**: Seluruh log edit pesan, member masuk/keluar, tindakan moderasi (kick, ban, softban, timeout, warn), tiket bantuan, dan voice disconnect otomatis masuk ke channel **`#admin-logs`**.
-
----
-
-### 2. 🎙️ Manajemen Voice Channel Staf (Room Control)
-- **`.vckick @user`**: Memutus koneksi (*disconnect*) paksa member yang mengganggu dari voice channel tanpa perlu kick dari server.
-- **`.vcmute @user`**: Server-mute instan mic member di voice channel saat terjadi mic-spam atau keributan.
-- **`.vcunmute @user`**: Mencabut server-mute mic member di voice channel.
-- **`.vcmove @user [nama/ID channel]`**: Memindahkan member langsung ke voice channel lain (contoh: dipindahkan ke ruang rapat/sidang mod).
+### 🚪 1. Kategori Akses, Gerbang Server & Verifikasi (Gatekeeping)
+- **`.setupverify`**: Mengirim panel verifikasi rules. Member baru menekan tombol untuk mengambil role **`CLUB`**, yang secara otomatis membuka akses seluruh channel kategori `COMMUNITY`.
+- **`.lockdown`**: Mengunci seluruh channel obrolan server secara instan saat terjadi serangan/raid darurat.
+- **`.unlockdown`**: Mencabut status lockdown dan membuka kembali obrolan normal.
+- **`.syncperms [#channel]`**: Menyamakan izin (*permissions*) suatu channel dengan kategori induknya secara otomatis.
 
 ---
 
-### 3. 🛡️ Karantina & Deteksi Keamanan (Anti-Raid / Alt-Detection)
-- **`.slowmode [detik]`**: Mengatur jeda pengiriman pesan (misal `.slowmode 10` atau `.slowmode 0` untuk menonaktifkan) saat terjadi obrolan yang memanas tanpa harus mengunci channel.
-- **`.scanalt`**: Memindai seluruh member server untuk mencari akun kloningan / perusuh yang umur akun Discord-nya kurang dari 7 hari.
-- **`.softban @user [alasan]`**: Melakukan ban lalu unban otomatis dalam 1 detik untuk menghapus riwayat chat spam member tersebut selama 24 jam terakhir sekaligus mengeluarkannya dari server.
+### 🔎 2. Kategori Staf & Investigasi Cepat (Mod Utilities)
+- **`.snipe`**: Memunculkan pesan terakhir yang baru saja dihapus di channel tersebut beserta nama pengirim, jam, dan lampiran.
+- **`.editsnipe`**: Menampilkan isi asli pesan sebelum diubah atau diedit oleh pengirimnya.
+- **`.checkalt [hari]`**: Memindai seluruh server untuk mendata member yang akun Discord-nya baru berumur kurang dari 3–7 hari (default 7 hari).
+- **`.slowmode [detik]`**: Mengatur jeda pengiriman pesan (misal `.slowmode 5` atau `.slowmode 0` untuk mematikan).
+- **🚨 Anti-Ghostping Otomatis**: Mendeteksi dan membongkar pelaku yang me-mention member/staf lalu langsung menghapus pesannya dalam hitungan detik.
 
 ---
 
-### 4. 🤫 Utilitas Moderasi & Notifikasi Senyap
-- **`.dm @user [pesan]`**: Mengirim pesan pribadi resmi staf atas nama bot kepada member (berguna untuk teguran privat atau klarifikasi tanpa memicu drama publik).
-- **`.snipe`**: Memunculkan kembali pesan terakhir yang baru saja dihapus di channel tersebut beserta nama pengirim dan lampirannya.
-- **`.roleall @role`**: Memberikan role tertentu ke seluruh member server secara otomatis (dilengkapi anti-ratelimit).
-- **`.removeroleall @role`**: Mencabut role tertentu dari seluruh member server sekaligus.
+### ⚖️ 3. Kategori Disiplin & Karantina Lanjutan
+- **`.modpanel @user`**: Memunculkan kartu member interaktif dengan tombol taktis cepat:
+  - ⏳ **Mute 10m**
+  - ⚠️ **Warn**
+  - 👢 **Kick**
+  - 🔨 **Ban**
+- **`.jail @user [alasan]`**: Mencabut semua role member, menyimpannya di database, dan memindahkannya ke role **`@Jailed`** untuk sidang interogasi staf.
+- **`.unjail @user`**: Mengembalikan seluruh role asli member setelah sidang selesai.
+- **`.softban @user [alasan]`**: Melakukan ban lalu unban instan untuk membersihkan seluruh riwayat chat spam 24 jam terakhir sekaligus mengeluarkan pelaku.
+- **`.dm @user [pesan]`**: Mengirim teguran atau pesan resmi atas nama bot langsung ke direct message member secara privat.
 
 ---
 
-### 5. ⚖️ Sistem Peringatan Bertingkat & Kontrol Server
-- **`.warn @user [alasan]`**: Menambah poin pelanggaran (3x = Timeout 1 Jam, 5x = Auto-Ban).
-- **`.checkwarn @user`**: Memeriksa riwayat teguran member.
-- **`.clearwarn @user`**: Mereset riwayat teguran member.
-- **`.lock` & `.unlock`**: Kunci dan buka channel obrolan seketika.
-- **`.clear [1-100]`**: Hapus pesan massal.
-- **`.setupticket`**: Panel tombol tiket bantuan privat staf.
-- **`.setuproles`**: Panel tombol role minat (@MLBB, @Valorant, @Anime, @Video Editor).
+### 🎙️ 4. Kategori Interaksi Voice Staf & Waiting Room
+- **`.vckick @user`**: Memutus sambungan (*disconnect*) paksa member dari voice channel.
+- **`.vcmute @user`** / **`.vcunmute @user`**: Mute / unmute server mic member di voice channel.
+- **`.vcmove @user [channel]`**: Memindahkan member antar-voice channel secara instan.
+- **`.next` (Voice Waiting Room)**: Otomatis menarik member antrean terdepan dari Ruang Tunggu masuk ke voice channel moderator (`AdminVoice`) saat sesi sidang/pengaduan.
 
 ---
 
-## 📋 Tabel Perintah Staf Lengkap
-
-| Perintah | Deskripsi | Contoh |
-|---|---|---|
-| `.help mod` | Menampilkan panduan lengkap seluruh fitur staf | `.help mod` |
-| `.snipe` | Menampilkan pesan terakhir yang dihapus di channel | `.snipe` |
-| `.vckick @user` | Disconnect paksa member dari voice | `.vckick @user` |
-| `.vcmute @user` / `.vcunmute @user` | Mute / Unmute mic member di voice | `.vcmute @user` |
-| `.vcmove @user [channel]` | Pindahkan member ke voice channel lain | `.vcmove @user AdminVoice` |
-| `.slowmode [detik]` | Atur jeda slowmode chat channel | `.slowmode 10` |
-| `.scanalt` | Pindai akun mencurigakan (< 7 hari) | `.scanalt` |
-| `.softban @user [alasan]` | Bersihkan chat 24 jam & keluarkan member | `.softban @user Spam raiding` |
-| `.dm @user [pesan]` | Kirim DM resmi atas nama bot | `.dm @user Harap baca rules` |
-| `.roleall @role` | Berikan role ke seluruh member | `.roleall @Member` |
-| `.removeroleall @role` | Cabut role dari seluruh member | `.removeroleall @Event` |
-| `.warn @user [alasan]` | Beri peringatan bertingkat (3x=Mute, 5x=Ban) | `.warn @user Toxic di chat` |
-| `.checkwarn @user` | Cek poin & riwayat pelanggaran | `.checkwarn @user` |
-| `.clearwarn @user` | Reset seluruh poin peringatan member | `.clearwarn @user` |
-| `.lock` / `.unlock` | Kunci / buka obrolan di channel saat ini | `.lock` |
-| `.clear [1-100]` | Hapus pesan massal | `.clear 30` |
+### 📊 5. Kategori Evaluasi Internal Staf
+- **`.modstats [@moderator]`**: Menampilkan rekapitulasi keaktifan staf (jumlah timeout, kick, ban, warn, clear chat, dan tiket yang ditangani) untuk bahan evaluasi berkala oleh Owner (`KING'S`).
 
 ---
 
-## 🚀 Panduan Update ke Bot-Hosting.net
+### 🎮 6. Kategori Komunitas, Gaming & Editor
+- **`.mabar [Game] [Slot]`**: Membuat ajakan mabar interaktif dengan tombol **"Join"** dan **"Leave"**, lalu otomatis me-mention seluruh peserta saat kuota slot terpenuhi.
+- **`.rate` / `.feedback`**: Membuat thread diskusi polling rating bintang 1–5 di bawah video AMV atau karya desain grafis member.
+- **`.preset` / `.assets`**: Menampilkan panel embed berisi kumpulan link Google Drive bahan editing resmi (font pack, SFX, overlay, preset AM/AE).
+- **`.afk [alasan]`**: Menandai status AFK; bot akan membalas otomatis jika ada yang me-mention Anda, lalu mencabut statusnya saat Anda kembali mengetik.
+- **`.rep @user [alasan]`** & **`.checkrep @user`**: Sistem poin reputasi/respect antar-member komunitas.
 
-1. Buka dashboard di [bot-hosting.net](https://bot-hosting.net).
-2. Masuk ke deployment **AmbanimeOfficial**.
-3. Buka tab **Files** > klik file **`index.js`**.
-4. Ganti seluruh isinya dengan kode terbaru dari `D:\discordbot\index.js`.
+---
+
+### 📁 Pemisahan Channel Logging Otomatis
+- **🗑️ Pesan Terhapus**: Khusus dicatat di channel **`#delete-message`**.
+- **📜 Log Audit Umum**: Log pesan diedit, member join/leave, warn, jail, voice, dan tiket dicatat di **`#admin-logs`**.
+
+---
+
+## 🚀 Panduan Update di Bot-Hosting.net
+
+1. Buka dashboard [bot-hosting.net](https://bot-hosting.net) (deployment **AmbanimeOfficial**).
+2. Masuk ke menu **Files** > buka **`index.js`**.
+3. Hapus seluruh isi lama, lalu **Copy & Paste** kode terbaru dari `D:\discordbot\index.js`.
+4. Klik **Save Content**.
 5. Buka tab **Console**, lalu klik **Restart**.
