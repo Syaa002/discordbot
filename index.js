@@ -13,14 +13,15 @@ const {
 const fs = require('fs');
 const path = require('path');
 
-// Inisialisasi Discord Client dengan Intent & Partial lengkap
+// Inisialisasi Discord Client dengan Intent & Partial lengkap (Termasuk VoiceStates)
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildModeration
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildVoiceStates
   ],
   partials: [
     Partials.Message,
@@ -33,6 +34,10 @@ const client = new Client({
 // Konfigurasi Bot
 const PREFIX = process.env.PREFIX || '.';
 const LOG_CHANNEL_NAME = (process.env.LOG_CHANNEL_NAME || 'admin-logs').toLowerCase();
+const DELETE_LOG_CHANNEL_NAME = (process.env.DELETE_LOG_CHANNEL_NAME || 'delete-message').toLowerCase();
+
+// Penyimpanan Pesan Terhapus Sementara untuk Perintah .snipe
+const snipes = new Map();
 
 // File Penyimpanan Peringatan (Warn System Persistence)
 const WARN_FILE = path.join(__dirname, 'warnings.json');
@@ -101,7 +106,7 @@ const BLACKLISTED_WORDS = [
   'tolol', 'goblok', 'idiot'
 ];
 
-// Helper: Mengirim pesan log ke channel #admin-logs
+// Helper: Mengirim pesan log umum ke #admin-logs
 async function sendAuditLog(guild, embed) {
   if (!guild) return;
   try {
@@ -116,7 +121,25 @@ async function sendAuditLog(guild, embed) {
   }
 }
 
-// Helper: Parser durasi waktu (misal: 10, 10m, 1h, 1d)
+// Helper: Mengirim log khusus pesan dihapus ke #delete-message (fallback ke admin-logs jika tidak ada)
+async function sendDeleteLog(guild, embed) {
+  if (!guild) return;
+  try {
+    const targetChannel = guild.channels.cache.find(
+      c => c.isTextBased() && c.name.toLowerCase() === DELETE_LOG_CHANNEL_NAME
+    ) || guild.channels.cache.find(
+      c => c.isTextBased() && c.name.toLowerCase() === LOG_CHANNEL_NAME
+    );
+
+    if (targetChannel) {
+      await targetChannel.send({ embeds: [embed] }).catch(() => {});
+    }
+  } catch (err) {
+    console.error('Error saat mengirim log ke delete-message:', err);
+  }
+}
+
+// Helper: Parser durasi waktu
 function parseDuration(input) {
   if (!input) return null;
   if (/^\d+$/.test(input)) {
@@ -137,7 +160,7 @@ function parseDuration(input) {
   }
 }
 
-// Helper: Format durasi milidetik ke teks yang mudah dibaca
+// Helper: Format durasi milidetik
 function formatDuration(ms) {
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds} detik`;
@@ -182,8 +205,9 @@ client.once('ready', () => {
   console.log(`========================================`);
   console.log(`✅ Bot berhasil online sebagai: ${client.user.tag}`);
   console.log(`⚙️ Prefix perintah: ${PREFIX} (juga mendukung !)`);
-  console.log(`📋 Channel logging target: #${LOG_CHANNEL_NAME}`);
-  console.log(`🎫 Sistem Tiket, Auto-Mod & Warn System: SIAP & AKTIF`);
+  console.log(`📋 Channel log umum: #${LOG_CHANNEL_NAME}`);
+  console.log(`🗑️ Channel log pesan terhapus: #${DELETE_LOG_CHANNEL_NAME}`);
+  console.log(`🎙️ Voice Control & Staf Utilities: AKTIF`);
   console.log(`========================================`);
 });
 
@@ -191,9 +215,17 @@ client.once('ready', () => {
 // 1. SISTEM LOGGING (AUDIT TRAIL)
 // ==========================================
 
-// Log: Pesan Dihapus
+// Log: Pesan Dihapus -> Dikirim ke #delete-message
 client.on('messageDelete', async (message) => {
   if (!message.guild || message.author?.bot) return;
+
+  // Simpan data pesan terakhir yang terhapus untuk fitur .snipe
+  snipes.set(message.channel.id, {
+    content: message.content || '',
+    author: message.author,
+    attachments: message.attachments ? message.attachments.map(a => a.url) : [],
+    timestamp: Date.now()
+  });
 
   const content = message.content 
     ? (message.content.length > 1024 ? message.content.substring(0, 1020) + '...' : message.content)
@@ -214,10 +246,11 @@ client.on('messageDelete', async (message) => {
     embed.addFields({ name: '📎 Lampiran', value: attachmentNames.substring(0, 1024) });
   }
 
-  await sendAuditLog(message.guild, embed);
+  // Kirim khusus ke #delete-message
+  await sendDeleteLog(message.guild, embed);
 });
 
-// Log: Pesan Diedit
+// Log: Pesan Diedit -> Dikirim ke #admin-logs
 client.on('messageUpdate', async (oldMessage, newMessage) => {
   if (!newMessage.guild || newMessage.author?.bot) return;
   if (oldMessage.content === newMessage.content) return;
@@ -245,7 +278,7 @@ client.on('messageUpdate', async (oldMessage, newMessage) => {
   await sendAuditLog(newMessage.guild, embed);
 });
 
-// Log: Member Baru Bergabung
+// Log: Member Baru Bergabung -> Dikirim ke #admin-logs
 client.on('guildMemberAdd', async (member) => {
   const accountCreated = Math.floor(member.user.createdTimestamp / 1000);
   const embed = new EmbedBuilder()
@@ -263,7 +296,7 @@ client.on('guildMemberAdd', async (member) => {
   await sendAuditLog(member.guild, embed);
 });
 
-// Log: Member Keluar / Dikeluarkan
+// Log: Member Keluar / Dikeluarkan -> Dikirim ke #admin-logs
 client.on('guildMemberRemove', async (member) => {
   const roles = member.roles?.cache
     ? member.roles.cache.filter(r => r.id !== member.guild.id).map(r => r.name).join(', ')
@@ -285,7 +318,7 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 // ==========================================
-// 2. MODERASI, AUTO-MOD & PERINTAH BOT
+// 2. MODERASI, VOICE CONTROL & PERINTAH BOT
 // ==========================================
 client.on('messageCreate', async (message) => {
   try {
@@ -299,7 +332,7 @@ client.on('messageCreate', async (message) => {
                     member.permissions.has(PermissionFlagsBits.Administrator);
 
     // ------------------------------------------
-    // AUTO-MOD 1: ANTI-INVITE & ANTI-PHISHING
+    // AUTO-MOD: ANTI-INVITE & ANTI-PHISHING
     // ------------------------------------------
     const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li)|discordapp\.com\/invite|discord\.com\/invite|dsc\.gg|invite\.gg)\/[a-zA-Z0-9_-]+/gi;
     const phishingRegex = /(nitro.*gift|gift.*nitro|free.*nitro|steamcommunity.*trade|steamcommunitu|dlscord|discorcl|discocrd|discord-nitro|nitro-airdrop)/gi;
@@ -331,7 +364,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ------------------------------------------
-    // AUTO-MOD 2: ANTI-SPAM MENTION
+    // AUTO-MOD: ANTI-SPAM MENTION
     // ------------------------------------------
     if (!isStaff) {
       const hasEveryoneTag = !member.permissions.has(PermissionFlagsBits.MentionEveryone) &&
@@ -360,7 +393,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ------------------------------------------
-    // AUTO-MOD 3: ANTI-CAPSLOCK BERLEBIHAN
+    // AUTO-MOD: ANTI-CAPSLOCK BERLEBIHAN
     // ------------------------------------------
     if (!isStaff && isExcessiveCaps(content)) {
       await message.delete().catch(() => {});
@@ -382,7 +415,7 @@ client.on('messageCreate', async (message) => {
     }
 
     // ------------------------------------------
-    // AUTO-MOD 4: WORD BLACKLIST (KATA KASAR/SARA)
+    // AUTO-MOD: WORD BLACKLIST (KATA KASAR/SARA)
     // ------------------------------------------
     if (!isStaff) {
       const badWord = detectBadWord(content);
@@ -434,51 +467,53 @@ client.on('messageCreate', async (message) => {
         const modEmbed = new EmbedBuilder()
           .setTitle('🛡️ Panel Panduan Terpadu Staf & Moderator')
           .setColor(0xED4245)
-          .setDescription('Panduan referensi cepat perintah staf untuk mengelola server:')
+          .setDescription('Panduan referensi cepat fitur unik staf internal:')
           .addFields(
             {
-              name: '⚖️ Manajemen Peringatan Bertingkat (Warn)',
+              name: '🎙️ Manajemen Voice Channel (Room Control)',
               value:
-                `\`${PREFIX}warn @user [alasan]\` : Beri peringatan.\n` +
-                `↳ *3x Warn = Auto-Timeout 1 Jam*\n` +
-                `↳ *5x Warn = Auto-Ban Permanen*\n` +
-                `\`${PREFIX}checkwarn @user\` : Cek riwayat peringatan member.\n` +
-                `\`${PREFIX}clearwarn @user\` : Reset semua peringatan member.`
+                `\`${PREFIX}vckick @user\` : Disconnect paksa member dari voice.\n` +
+                `\`${PREFIX}vcmute @user\` / \`${PREFIX}vcunmute @user\` : Server mute/unmute mic member.\n` +
+                `\`${PREFIX}vcmove @user [nama/ID channel]\` : Pindahkan member ke voice channel lain.`
             },
             {
-              name: '🔒 Kontrol & Komunikasi Channel',
+              name: '🛡️ Karantina & Deteksi Keamanan (Anti-Raid)',
               value:
-                `\`${PREFIX}lock\` : Kunci channel agar member biasa tidak bisa chat.\n` +
-                `\`${PREFIX}unlock\` : Buka kembali kunci channel.\n` +
-                `\`${PREFIX}say [pesan]\` : Kirim pengumuman resmi atas nama bot.`
+                `\`${PREFIX}slowmode [detik]\` : Atur jeda chat (0 untuk mematikan).\n` +
+                `\`${PREFIX}scanalt\` : Pindai akun mencurigakan yang berumur < 7 hari.\n` +
+                `\`${PREFIX}softban @user [alasan]\` : Ban lalu unban instan (hapus riwayat chat 24 jam & keluarkan member).`
             },
             {
-              name: '🧹 Moderasi Pesan & Disiplin',
+              name: '🤫 Utilitas Moderasi & Notifikasi Senyap',
               value:
-                `\`${PREFIX}clear [1-100]\` / \`${PREFIX}purge [1-100]\` : Hapus pesan massal.\n` +
-                `\`${PREFIX}timeout @user [durasi] [alasan]\` (Alias: \`${PREFIX}mute\`)\n` +
-                `\`${PREFIX}untimeout @user\` (Alias: \`${PREFIX}unmute\`)\n` +
-                `\`${PREFIX}kick @user [alasan]\` : Keluarkan member.\n` +
-                `\`${PREFIX}ban @user [alasan]\` : Ban member & hapus chat 24 jam.\n` +
-                `\`${PREFIX}unban <ID_User> [alasan]\` : Cabut status ban via ID.`
+                `\`${PREFIX}dm @user [pesan]\` : Kirim pesan privat resmi staf atas nama bot.\n` +
+                `\`${PREFIX}snipe\` : Munculkan kembali pesan terakhir yang baru saja dihapus.\n` +
+                `\`${PREFIX}roleall @role\` : Berikan role ke seluruh member sekaligus.\n` +
+                `\`${PREFIX}removeroleall @role\` : Cabut role dari seluruh member sekaligus.`
             },
             {
-              name: '🎫 Panel Komunitas & Bantuan',
+              name: '⚖️ Sistem Peringatan Bertingkat (Warn)',
               value:
-                `\`${PREFIX}setupticket\` : Memasang panel Tiket Bantuan Privat Staf.\n` +
-                `\`${PREFIX}setuproles\` : Memasang panel tombol role minat (@MLBB, @Valorant, dll).`
+                `\`${PREFIX}warn @user [alasan]\` : 3x = Timeout 1 Jam, 5x = Auto-Ban.\n` +
+                `\`${PREFIX}checkwarn @user\` : Cek riwayat peringatan.\n` +
+                `\`${PREFIX}clearwarn @user\` : Reset poin peringatan.`
             },
             {
-              name: '🤖 Otomasi Auto-Mod Aktif',
+              name: '🧹 Kontrol Chat & Channel',
               value:
-                `• Anti-Invite Discord & Anti-Phishing Link\n` +
-                `• Anti-Capslock (> 70% pada pesan panjang)\n` +
-                `• Anti-Spam Mention (> 4 member atau @everyone)\n` +
-                `• Word Blacklist (Filter kata kasar/SARA otomatis)\n` +
-                `• Seluruh log masuk ke channel \`#${LOG_CHANNEL_NAME}\``
+                `\`${PREFIX}lock\` / \`${PREFIX}unlock\` : Kunci / buka channel obrolan.\n` +
+                `\`${PREFIX}say [pesan]\` : Pengumuman resmi via bot.\n` +
+                `\`${PREFIX}clear [1-100]\` : Bersihkan pesan massal.\n` +
+                `\`${PREFIX}timeout @user [durasi]\` / \`${PREFIX}kick\` / \`${PREFIX}ban\``
+            },
+            {
+              name: '📁 Pemisahan Channel Logging',
+              value:
+                `• Pesan Terhapus ➔ \`#${DELETE_LOG_CHANNEL_NAME}\`\n` +
+                `• Pesan Diedit, Member & Audit Staf ➔ \`#${LOG_CHANNEL_NAME}\``
             }
           )
-          .setFooter({ text: 'Gunakan wewenang moderasi dengan bijak dan adil.' })
+          .setFooter({ text: 'Gunakan wewenang staf dengan bijak.' })
           .setTimestamp();
 
         return message.channel.send({ embeds: [modEmbed] }).catch(() => {});
@@ -493,18 +528,444 @@ client.on('messageCreate', async (message) => {
             name: '💬 Perintah Umum & Role',
             value:
               `\`${PREFIX}help\` : Menampilkan menu bantuan ini.\n` +
+              `\`${PREFIX}snipe\` : Melihat pesan yang baru saja dihapus di channel ini.\n` +
               `\`${PREFIX}setuproles\` : Munculkan panel pilihan role notifikasi minat.\n` +
               `\`${PREFIX}setupticket\` : Munculkan panel buka tiket bantuan staf.`
           },
           {
             name: '🛡️ Menu Bantuan Staf & Moderator',
-            value: `Ketik **\`${PREFIX}help mod\`** untuk melihat seluruh perintah khusus staf (Disiplin, Warn, Lock, Purge, dll).`
+            value: `Ketik **\`${PREFIX}help mod\`** untuk melihat seluruh perintah khusus staf (Voice Control, Warn, Slowmode, Scanalt, Softban, DM, dll).`
           }
         )
         .setFooter({ text: 'Ambanime Official Bot' })
         .setTimestamp();
 
       return message.channel.send({ embeds: [helpEmbed] }).catch(() => {});
+    }
+
+    // ------------------------------------------
+    // FITUR UTILITY: .snipe (Melihat Pesan Terakhir yang Dihapus)
+    // ------------------------------------------
+    if (command === 'snipe') {
+      const sniped = snipes.get(message.channel.id);
+      if (!sniped) {
+        return message.reply('🔍 Tidak ada pesan yang baru saja dihapus di channel ini.');
+      }
+
+      const snipeEmbed = new EmbedBuilder()
+        .setAuthor({ 
+          name: sniped.author ? `${sniped.author.tag}` : 'Pengguna Tidak Diketahui', 
+          iconURL: sniped.author ? sniped.author.displayAvatarURL({ dynamic: true }) : undefined 
+        })
+        .setDescription(sniped.content || '*[Pesan tidak memiliki teks / hanya lampiran media]*')
+        .setColor(0xED4245)
+        .setFooter({ text: `Dihapus sekitar ${Math.round((Date.now() - sniped.timestamp) / 1000)} detik lalu` })
+        .setTimestamp(sniped.timestamp);
+
+      if (sniped.attachments && sniped.attachments.length > 0) {
+        snipeEmbed.setImage(sniped.attachments[0]);
+      }
+
+      return message.channel.send({ embeds: [snipeEmbed] }).catch(() => {});
+    }
+
+    // ------------------------------------------
+    // VOICE CONTROL 1: .vckick @user
+    // ------------------------------------------
+    if (command === 'vckick') {
+      if (!member.permissions.has(PermissionFlagsBits.MoveMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Move Members` untuk memutus koneksi voice.');
+      }
+
+      const target = message.mentions.members.first();
+      if (!target) return message.reply(`⚠️ Sebutkan member yang ingin diputus dari voice channel.\nContoh: \`${PREFIX}vckick @user\``);
+
+      if (!target.voice.channel) {
+        return message.reply('⚠️ Member tersebut tidak sedang berada di dalam voice channel manapun.');
+      }
+
+      try {
+        const channelName = target.voice.channel.name;
+        await target.voice.disconnect(`Diputus oleh ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+          .setTitle('🔌 Voice Disconnect (VC-Kick)')
+          .setColor(0xED4245)
+          .setDescription(`**${target.user.tag}** berhasil diputus dari voice channel **${channelName}**.`)
+          .addFields(
+            { name: 'Target', value: `<@${target.id}>`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true }
+          )
+          .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await sendAuditLog(message.guild, embed);
+      } catch (err) {
+        console.error(err);
+        message.reply('❌ Gagal memutus koneksi voice member.');
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // VOICE CONTROL 2: .vcmute & .vcunmute @user
+    // ------------------------------------------
+    if (command === 'vcmute') {
+      if (!member.permissions.has(PermissionFlagsBits.MuteMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Mute Members`.');
+      }
+
+      const target = message.mentions.members.first();
+      if (!target) return message.reply(`⚠️ Sebutkan member yang ingin di-mute di voice channel.`);
+      if (!target.voice.channel) return message.reply('⚠️ Member tidak berada di dalam voice channel.');
+
+      try {
+        await target.voice.setMute(true, `Server-mute oleh ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+          .setTitle('🔇 Voice Server Mute')
+          .setColor(0xFEE75C)
+          .setDescription(`Mic **${target.user.tag}** berhasil dibisukan di voice channel oleh moderator.`)
+          .addFields(
+            { name: 'Target', value: `<@${target.id}>`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true }
+          )
+          .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await sendAuditLog(message.guild, embed);
+      } catch (err) {
+        console.error(err);
+        message.reply('❌ Gagal mem-mute member di voice channel.');
+      }
+      return;
+    }
+
+    if (command === 'vcunmute') {
+      if (!member.permissions.has(PermissionFlagsBits.MuteMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Mute Members`.');
+      }
+
+      const target = message.mentions.members.first();
+      if (!target) return message.reply(`⚠️ Sebutkan member yang ingin di-unmute.`);
+      if (!target.voice.channel) return message.reply('⚠️ Member tidak berada di dalam voice channel.');
+
+      try {
+        await target.voice.setMute(false, `Server-unmute oleh ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+          .setTitle('🔊 Voice Server Unmute')
+          .setColor(0x57F287)
+          .setDescription(`Mic **${target.user.tag}** berhasil diaktifkan kembali oleh moderator.`)
+          .addFields(
+            { name: 'Target', value: `<@${target.id}>`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true }
+          )
+          .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await sendAuditLog(message.guild, embed);
+      } catch (err) {
+        console.error(err);
+        message.reply('❌ Gagal me-unmute member di voice channel.');
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // VOICE CONTROL 3: .vcmove @user [channel]
+    // ------------------------------------------
+    if (command === 'vcmove') {
+      if (!member.permissions.has(PermissionFlagsBits.MoveMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Move Members`.');
+      }
+
+      const target = message.mentions.members.first();
+      if (!target) return message.reply(`⚠️ Format: \`${PREFIX}vcmove @user [nama/ID channel voice]\``);
+      if (!target.voice.channel) return message.reply('⚠️ Member tidak berada di dalam voice channel.');
+
+      const targetChannelArg = args.slice(1).join(' ').replace(/[<#>]/g, '');
+      const destChannel = message.guild.channels.cache.find(c => 
+        c.isVoiceBased() && (c.id === targetChannelArg || c.name.toLowerCase() === targetChannelArg.toLowerCase())
+      );
+
+      if (!destChannel) {
+        return message.reply('⚠️ Voice channel tujuan tidak ditemukan. Masukkan nama channel voice atau ID yang sesuai.');
+      }
+
+      try {
+        const fromName = target.voice.channel.name;
+        await target.voice.setChannel(destChannel, `Dipindahkan oleh ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+          .setTitle('🔀 Member Dipindahkan (VC-Move)')
+          .setColor(0x5865F2)
+          .setDescription(`**${target.user.tag}** berhasil dipindahkan dari **${fromName}** ke **${destChannel.name}**.`)
+          .addFields(
+            { name: 'Target', value: `<@${target.id}>`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true }
+          )
+          .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await sendAuditLog(message.guild, embed);
+      } catch (err) {
+        console.error(err);
+        message.reply('❌ Gagal memindahkan member ke voice channel tujuan.');
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // KEAMANAN 1: .slowmode [detik]
+    // ------------------------------------------
+    if (command === 'slowmode') {
+      if (!member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Manage Channels`.');
+      }
+
+      const seconds = parseInt(args[0], 10);
+      if (isNaN(seconds) || seconds < 0 || seconds > 21600) {
+        return message.reply(`⚠️ Masukkan durasi slowmode antara **0 - 21600 detik** (0 untuk mematikan).\nContoh: \`${PREFIX}slowmode 10\` atau \`${PREFIX}slowmode 0\``);
+      }
+
+      try {
+        await message.channel.setRateLimitPerUser(seconds, `Diatur oleh ${message.author.tag}`);
+        const embed = new EmbedBuilder()
+          .setTitle('⏱️ Pengaturan Slowmode')
+          .setColor(seconds > 0 ? 0xFEE75C : 0x57F287)
+          .setDescription(seconds > 0 
+            ? `Slowmode di channel ini berhasil diatur ke **${seconds} detik** per pesan.` 
+            : `Slowmode di channel ini telah **dinonaktifkan**.`
+          )
+          .setFooter({ text: `Diatur oleh ${message.author.tag}` })
+          .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await sendAuditLog(message.guild, embed);
+      } catch (err) {
+        console.error(err);
+        message.reply('❌ Gagal mengatur slowmode di channel ini.');
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // KEAMANAN 2: .scanalt (Deteksi Akun < 7 Hari)
+    // ------------------------------------------
+    if (command === 'scanalt') {
+      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Moderate Members`.');
+      }
+
+      const loadingMsg = await message.channel.send('🔍 Sedang memindai seluruh member server untuk mendeteksi akun baru...');
+      try {
+        await message.guild.members.fetch();
+        const now = Date.now();
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+        const altMembers = message.guild.members.cache.filter(m => 
+          !m.user.bot && (now - m.user.createdTimestamp) < sevenDaysMs
+        );
+
+        if (altMembers.size === 0) {
+          return loadingMsg.edit('✅ **Hasil Scan:** Tidak ditemukan member dengan umur akun di bawah 7 hari.');
+        }
+
+        const list = altMembers.map(m => {
+          const createdUnix = Math.floor(m.user.createdTimestamp / 1000);
+          return `• **${m.user.tag}** (<@${m.id}>)\n  ↳ Dibuat: <t:${createdUnix}:R> (<t:${createdUnix}:F>)`;
+        }).slice(0, 15).join('\n\n');
+
+        const embed = new EmbedBuilder()
+          .setTitle(`🚨 Deteksi Akun Baru (< 7 Hari) - Total: ${altMembers.size}`)
+          .setColor(0xED4245)
+          .setDescription(list)
+          .setFooter({ text: altMembers.size > 15 ? 'Menampilkan 15 akun terbaru' : 'Pindai selesai' })
+          .setTimestamp();
+
+        await loadingMsg.edit({ content: null, embeds: [embed] });
+      } catch (err) {
+        console.error(err);
+        loadingMsg.edit('❌ Terjadi kesalahan saat memindai member.');
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // KEAMANAN 3: .softban @user [alasan]
+    // ------------------------------------------
+    if (command === 'softban') {
+      if (!member.permissions.has(PermissionFlagsBits.BanMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Ban Members`.');
+      }
+
+      const target = message.mentions.members.first();
+      if (!target) return message.reply(`⚠️ Sebutkan member yang ingin di-softban.\nContoh: \`${PREFIX}softban @user Spam chat berlebihan\``);
+
+      if (target.id === message.author.id || !target.bannable) {
+        return message.reply('❌ Bot tidak dapat melakukan softban pada member ini.');
+      }
+
+      const reason = args.slice(1).join(' ') || 'Softban: Pembersihan riwayat spam';
+
+      try {
+        await message.guild.members.ban(target.id, {
+          deleteMessageSeconds: 86400,
+          reason: `Softban oleh ${message.author.tag}: ${reason}`
+        });
+        await message.guild.members.unban(target.id, 'Softban: Unban otomatis');
+
+        const embed = new EmbedBuilder()
+          .setTitle('🧹 Member Di-Softban')
+          .setColor(0xED4245)
+          .setDescription(`**${target.user.tag}** berhasil dikeluarkan dan seluruh pesan **24 jam terakhir** telah dibersihkan.`)
+          .addFields(
+            { name: 'Target', value: `<@${target.id}>`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
+            { name: 'Alasan', value: reason }
+          )
+          .setTimestamp();
+
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
+        await sendAuditLog(message.guild, embed);
+      } catch (err) {
+        console.error(err);
+        message.reply('❌ Gagal melakukan softban.');
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // UTILITAS 1: .dm @user [pesan]
+    // ------------------------------------------
+    if (command === 'dm') {
+      if (!member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+        return message.reply('❌ Kamu tidak memiliki izin `Moderate Members`.');
+      }
+
+      const target = message.mentions.members.first();
+      if (!target) return message.reply(`⚠️ Format: \`${PREFIX}dm @user [pesan resmi staf]\``);
+
+      const dmText = args.slice(1).join(' ');
+      if (!dmText) return message.reply('⚠️ Masukkan isi pesan yang ingin disampaikan secara privat.');
+
+      await message.delete().catch(() => {});
+
+      const dmEmbed = new EmbedBuilder()
+        .setTitle(`📩 Pesan Resmi Staf Server: ${message.guild.name}`)
+        .setColor(0x5865F2)
+        .setDescription(dmText)
+        .setFooter({ text: `Pesan dikirimkan oleh Staf Server (${message.author.tag})` })
+        .setTimestamp();
+
+      try {
+        await target.send({ embeds: [dmEmbed] });
+        const confirmMsg = await message.channel.send(`✅ DM resmi berhasil dikirimkan ke **${target.user.tag}**.`);
+        setTimeout(() => confirmMsg.delete().catch(() => {}), 4000);
+
+        const logEmbed = new EmbedBuilder()
+          .setTitle('✉️ DM Resmi Staf Terkirim')
+          .setColor(0x57F287)
+          .addFields(
+            { name: 'Penerima', value: `${target.user.tag} (<@${target.id}>)`, inline: true },
+            { name: 'Pengirim', value: `<@${message.author.id}>`, inline: true },
+            { name: 'Isi Pesan', value: dmText.substring(0, 1024) }
+          )
+          .setTimestamp();
+
+        await sendAuditLog(message.guild, logEmbed);
+      } catch (err) {
+        message.channel.send(`❌ Gagal mengirimkan DM ke **${target.user.tag}** (kemungkinan DM diblokir/dinonaktifkan oleh pengguna).`).catch(() => {});
+      }
+      return;
+    }
+
+    // ------------------------------------------
+    // UTILITAS 2: .roleall & .removeroleall @role
+    // ------------------------------------------
+    if (command === 'roleall') {
+      if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ Hanya Administrator yang dapat menggunakan perintah `.roleall`.');
+      }
+
+      const role = message.mentions.roles.first() || message.guild.roles.cache.get(args[0]?.replace(/[<@&>]/g, ''));
+      if (!role) return message.reply(`⚠️ Sebutkan role yang ingin diberikan ke seluruh member.\nContoh: \`${PREFIX}roleall @Member\``);
+
+      if (role.position >= message.guild.members.me.roles.highest.position) {
+        return message.reply('❌ Bot tidak dapat memberikan role ini karena posisinya setara atau di atas role bot.');
+      }
+
+      const statusMsg = await message.channel.send(`⏳ Sedang memproses penambahan role **@${role.name}** ke seluruh member...`);
+
+      try {
+        await message.guild.members.fetch();
+        let count = 0;
+        const members = message.guild.members.cache.filter(m => !m.user.bot && !m.roles.cache.has(role.id));
+
+        for (const [, targetMember] of members) {
+          await targetMember.roles.add(role).catch(() => {});
+          count++;
+          await new Promise(r => setTimeout(r, 250));
+        }
+
+        await statusMsg.edit(`✅ Berhasil menambahkan role **@${role.name}** ke **${count}** member.`);
+        const logEmbed = new EmbedBuilder()
+          .setTitle('👥 Role Massal Diberikan (RoleAll)')
+          .setColor(0x57F287)
+          .addFields(
+            { name: 'Role', value: `${role.name} (${role.id})`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
+            { name: 'Total Penerima', value: `${count} member`, inline: true }
+          )
+          .setTimestamp();
+
+        await sendAuditLog(message.guild, logEmbed);
+      } catch (err) {
+        console.error(err);
+        statusMsg.edit('❌ Terjadi kesalahan saat memproses penambahan role massal.');
+      }
+      return;
+    }
+
+    if (command === 'removeroleall') {
+      if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ Hanya Administrator yang dapat menggunakan perintah `.removeroleall`.');
+      }
+
+      const role = message.mentions.roles.first() || message.guild.roles.cache.get(args[0]?.replace(/[<@&>]/g, ''));
+      if (!role) return message.reply(`⚠️ Sebutkan role yang ingin dicabut dari seluruh member.\nContoh: \`${PREFIX}removeroleall @Event\``);
+
+      if (role.position >= message.guild.members.me.roles.highest.position) {
+        return message.reply('❌ Posisi role ini berada di atas atau setara dengan role bot.');
+      }
+
+      const statusMsg = await message.channel.send(`⏳ Sedang memproses pencabutan role **@${role.name}** dari seluruh member...`);
+
+      try {
+        await message.guild.members.fetch();
+        let count = 0;
+        const members = message.guild.members.cache.filter(m => !m.user.bot && m.roles.cache.has(role.id));
+
+        for (const [, targetMember] of members) {
+          await targetMember.roles.remove(role).catch(() => {});
+          count++;
+          await new Promise(r => setTimeout(r, 250));
+        }
+
+        await statusMsg.edit(`✅ Berhasil mencabut role **@${role.name}** dari **${count}** member.`);
+        const logEmbed = new EmbedBuilder()
+          .setTitle('👥 Role Massal Dicabut (RemoveRoleAll)')
+          .setColor(0xED4245)
+          .addFields(
+            { name: 'Role', value: `${role.name} (${role.id})`, inline: true },
+            { name: 'Moderator', value: `<@${message.author.id}>`, inline: true },
+            { name: 'Total Member', value: `${count} member`, inline: true }
+          )
+          .setTimestamp();
+
+        await sendAuditLog(message.guild, logEmbed);
+      } catch (err) {
+        console.error(err);
+        statusMsg.edit('❌ Terjadi kesalahan saat mencabut role massal.');
+      }
+      return;
     }
 
     // ------------------------------------------
@@ -593,8 +1054,6 @@ client.on('messageCreate', async (message) => {
       await message.channel.send({ embeds: [warnEmbed] }).catch(() => {});
       await sendAuditLog(message.guild, warnEmbed);
 
-      // Otomasi Tindakan Bertingkat:
-      // 5x Warn = Auto Ban
       if (currentCount >= 5) {
         if (target.bannable) {
           try {
@@ -610,9 +1069,7 @@ client.on('messageCreate', async (message) => {
             console.error(e);
           }
         }
-      } 
-      // 3x Warn = Auto Timeout 1 Jam
-      else if (currentCount === 3) {
+      } else if (currentCount === 3) {
         if (target.moderatable) {
           try {
             const oneHourMs = 60 * 60 * 1000;
