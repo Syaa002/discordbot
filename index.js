@@ -97,44 +97,6 @@ function recordModStat(modId, action) {
   saveData('modstats.json', stats);
 }
 
-// ==========================================
-// DAFTAR ROLE MINAT (SELF-ASSIGNABLE ROLES)
-// ==========================================
-const ROLE_CONFIG = [
-  {
-    id: 'role_mlbb',
-    name: 'MLBB',
-    label: 'MLBB',
-    emoji: '⚔️',
-    style: ButtonStyle.Primary,
-    description: 'Pemain Mobile Legends: Bang Bang'
-  },
-  {
-    id: 'role_valorant',
-    name: 'Valorant',
-    label: 'Valorant',
-    emoji: '🎯',
-    style: ButtonStyle.Danger,
-    description: 'Pemain Valorant'
-  },
-  {
-    id: 'role_anime',
-    name: 'Anime',
-    label: 'Anime',
-    emoji: '🌸',
-    style: ButtonStyle.Secondary,
-    description: 'Pecinta Anime & Manga'
-  },
-  {
-    id: 'role_video_editor',
-    name: 'Video Editor',
-    label: 'Video Editor',
-    emoji: '🎬',
-    style: ButtonStyle.Success,
-    description: 'Creator, Content & Video Editor'
-  }
-];
-
 // Daftar Kata Kasar / SARA (Word Blacklist)
 const BLACKLISTED_WORDS = [
   'kontol', 'memek', 'ngentot', 'pantek', 'peler', 'jembut',
@@ -642,10 +604,8 @@ client.on('messageCreate', async (message) => {
               `\`${PREFIX}preset\` / \`${PREFIX}assets\` : Dapatkan link bahan editing AMV & desain.`
           },
           {
-            name: '🎭 Role & Bantuan',
-            value:
-              `\`${PREFIX}setuproles\` : Munculkan panel pilihan role notifikasi minat.\n` +
-              `\`${PREFIX}setupticket\` : Munculkan panel tiket bantuan staf.`
+            name: '🎫 Bantuan & Tiket Staf',
+            value: `\`${PREFIX}setupticket\` : Munculkan panel tiket bantuan staf.`
           },
           {
             name: '🛡️ Menu Khusus Staf & Moderator',
@@ -1757,28 +1717,7 @@ client.on('messageCreate', async (message) => {
       return message.channel.send(`🔓 Status ban untuk ID **${userId}** telah dicabut.`);
     }
 
-    // .setuproles & .setupticket
-    if (command === 'setuproles' || command === 'rolepanel') {
-      if (!member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Izin ditolak.');
-      const roleDescriptions = ROLE_CONFIG.map(r => `${r.emoji} • **@${r.name}** : ${r.description}`).join('\n');
-      const embed = new EmbedBuilder()
-        .setTitle('🎮 PILIHAN ROLE MINAT & NOTIFIKASI')
-        .setDescription(
-          'Silakan ambil role sesuai minat dan game yang kamu sukai dengan menekan tombol di bawah ini!\n\n' +
-          `${roleDescriptions}\n\n` +
-          '📌 *Klik tombol sekali untuk mengambil role, klik lagi untuk melepas role.*'
-        )
-        .setColor(0x2B2D31)
-        .setTimestamp();
-
-      const row = new ActionRowBuilder();
-      for (const r of ROLE_CONFIG) {
-        row.addComponents(new ButtonBuilder().setCustomId(r.id).setLabel(r.label).setEmoji(r.emoji).setStyle(r.style));
-      }
-      await message.channel.send({ embeds: [embed], components: [row] });
-      await message.delete().catch(() => {});
-      return;
-    }
+    // .setupticket
 
     if (command === 'setupticket' || command === 'ticketpanel') {
       if (!member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Izin ditolak.');
@@ -2058,37 +1997,7 @@ client.on('interactionCreate', async (interaction) => {
     return;
   }
 
-  // ------------------------------------------
-  // E. TOGGLE AUTO-ROLE MINAT
-  // ------------------------------------------
-  const targetConfig = ROLE_CONFIG.find(r => r.id === interaction.customId);
-  if (!targetConfig) return;
 
-  try {
-    let role = guild.roles.cache.find(r => r.name.toLowerCase() === targetConfig.name.toLowerCase());
-    if (!role && guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
-      role = await guild.roles.create({ name: targetConfig.name, mentionable: true }).catch(() => null);
-    }
-
-    if (!role) {
-      return interaction.reply({ content: `⚠️ Role **@${targetConfig.name}** belum ada di server.`, ephemeral: true });
-    }
-
-    if (role.position >= guild.members.me.roles.highest.position) {
-      return interaction.reply({ content: `⚠️ Posisi role bot berada di bawah role **${role.name}**.`, ephemeral: true });
-    }
-
-    if (member.roles.cache.has(role.id)) {
-      await member.roles.remove(role);
-      return interaction.reply({ content: `🔴 Role **@${role.name}** berhasil dilepas dari profilmu.`, ephemeral: true });
-    } else {
-      await member.roles.add(role);
-      return interaction.reply({ content: `🟢 Role **@${role.name}** berhasil ditambahkan ke profilmu!`, ephemeral: true });
-    }
-  } catch (err) {
-    console.error(err);
-    interaction.reply({ content: '❌ Gagal memperbarui role.', ephemeral: true }).catch(() => {});
-  }
 });
 
 // Penanganan Error Global
