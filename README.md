@@ -65,7 +65,10 @@ Prefix Perintah: **`.`** (Titik) — *juga otomatis merespons prefix `!`*
 
 ---
 
-### ⚙️ 7. Kategori Kontrol Perintah (Maintenance)
+### ⚙️ 7. Kategori Kontrol Perintah & Pengingat Renew Hosting
+- **⏰ Pengingat Renew Bot-Hosting Otomatis (`node-cron`)**: Mengirim notifikasi privat langsung ke **Direct Message (DM) Pemilik Bot** setiap hari pukul 12:00 WIB agar tidak lupa menekan tombol *Renew/Extend* (masa aktif 4 hari).
+- **`.cekrenew`**: Menampilkan embed tautan resmi menuju panel dashboard Bot-Hosting untuk perpanjangan masa aktif server.
+- **🧪 `.testdm` (Secret Command)**: Perintah uji coba rahasia (hanya bisa dijalankan oleh Administrator/Owner) untuk memastikan sistem pengiriman DM bot berjalan lancar. Tidak dimasukkan ke daftar menu `.help`.
 - **`.disable <nama_command>`**: Menonaktifkan perintah tertentu sementara tanpa perlu restart bot (misal: `.disable preset`).
 - **`.enable <nama_command>`**: Mengaktifkan kembali perintah yang sebelumnya dinonaktifkan.
 - **Penyimpanan:** Daftar perintah nonaktif tersimpan di database berkas (`disabled_commands.json`) sehingga status nonaktif tetap bertahan meskipun bot di-restart.

@@ -11,6 +11,7 @@ const {
   ButtonStyle, 
   EmbedBuilder 
 } = require('discord.js');
+const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
 
@@ -38,6 +39,7 @@ const client = new Client({
 const PREFIX = process.env.PREFIX || '.';
 const LOG_CHANNEL_NAME = (process.env.LOG_CHANNEL_NAME || 'admin-logs').toLowerCase();
 const DELETE_LOG_CHANNEL_NAME = (process.env.DELETE_LOG_CHANNEL_NAME || 'delete-message').toLowerCase();
+const OWNER_USER_ID = process.env.OWNER_USER_ID || '';
 
 // Penyimpanan Data Sementara di Memori (In-Memory Caches)
 const snipes = new Map();
@@ -219,6 +221,61 @@ client.once('ready', async () => {
       console.error('Gagal pre-cache messages:', e);
     }
   }
+
+  // ==========================================
+  // JADWAL PENGINGAT RENEW KE DM PRIBADI OWNER (Setiap Hari Pukul 12:00 WIB)
+  // Format cron: menit jam hari bulan hari_dalam_minggu
+  // ==========================================
+  cron.schedule('0 12 * * *', async () => {
+    try {
+      let targetUser = null;
+
+      // 1. Ambil akun berdasarkan OWNER_USER_ID jika dikonfigurasi
+      if (OWNER_USER_ID && OWNER_USER_ID.length > 10) {
+        targetUser = await client.users.fetch(OWNER_USER_ID).catch(() => null);
+      }
+
+      // 2. Fallback otomatis ke Server Owner jika OWNER_USER_ID belum diisi
+      if (!targetUser) {
+        for (const [, guild] of client.guilds.cache) {
+          try {
+            const guildOwner = await guild.fetchOwner();
+            if (guildOwner?.user) {
+              targetUser = guildOwner.user;
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+
+      if (!targetUser) {
+        console.warn('[Cron] Pengingat renew: Akun Owner tidak ditemukan.');
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('⏰ PENGINGAT PRIBADI: RENEW BOT-HOSTING')
+        .setDescription(
+          `Halo **${targetUser.username}**!\n\n` +
+          'Ini adalah pengingat harian untuk mengecek sisa masa aktif server bot di **Bot-Hosting.net**.\n\n' +
+          '⚠️ **Server gratis wajib di-renew setiap 4 hari sekali.**\n' +
+          'Segera buka dashboard dan klik tombol **Renew / Extend** agar bot tetap menyala.'
+        )
+        .setColor(0xFEE75C)
+        .addFields(
+          { name: '🌐 Link Dashboard', value: '[Buka Bot-Hosting.net](https://bot-hosting.net)' }
+        )
+        .setFooter({ text: 'Notifikasi Otomatis Ambanime Bot' })
+        .setTimestamp();
+
+      await targetUser.send({ embeds: [embed] });
+      console.log(`[Cron] Pengingat renew harian berhasil dikirim ke DM: ${targetUser.tag}`);
+    } catch (err) {
+      console.error('Gagal mengirim DM pengingat renew ke Owner:', err);
+    }
+  }, {
+    timezone: "Asia/Jakarta" // Waktu Indonesia Barat (WIB)
+  });
 });
 
 // ==========================================
@@ -715,6 +772,7 @@ client.on('messageCreate', async (message) => {
             {
               name: '⚙️ 8. Kontrol Sistem Bot (Maintenance)',
               value:
+                `\`${PREFIX}cekrenew\` : Cek status & tautan perpanjangan masa aktif server Bot-Hosting.\n` +
                 `\`${PREFIX}disable <command>\` : Matikan perintah sementara (Contoh: \`${PREFIX}disable preset\`).\n` +
                 `\`${PREFIX}enable <command>\` : Aktifkan kembali perintah yang dimatikan.`
             }
@@ -1897,6 +1955,67 @@ client.on('messageCreate', async (message) => {
       );
       await message.channel.send({ embeds: [ticketEmbed], components: [row] });
       await message.delete().catch(() => {});
+      return;
+    }
+
+    // ==========================================
+    // PERINTAH: .cekrenew (Tautan Perpanjangan Bot-Hosting)
+    // ==========================================
+    if (command === 'cekrenew') {
+      const embed = new EmbedBuilder()
+        .setTitle('🔗 Tautan Perpanjangan Bot-Hosting')
+        .setDescription(
+          'Pastikan untuk selalu memperpanjang masa aktif server sebelum timer 4 hari habis:\n\n' +
+          '👉 [Buka Panel Bot-Hosting](https://bot-hosting.net)\n\n' +
+          '*Tips: Masuk ke menu dashboard, pilih proyek Ambanime, lalu klik tombol **Renew / Extend**.*'
+        )
+        .setColor(0x5865F2)
+        .setFooter({ text: 'Ambanime Bot • Bot-Hosting Reminder' })
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
+    }
+
+    // ==========================================
+    // SECRET COMMAND: .testdm (Uji Coba Kirim DM Pengingat)
+    // Perintah rahasia: Tidak dicatat di menu .help
+    // ==========================================
+    if (command === 'testdm') {
+      const isConfiguredOwner = OWNER_USER_ID && OWNER_USER_ID.length > 10 && message.author.id === OWNER_USER_ID;
+      const isAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator);
+
+      if (!isConfiguredOwner && !isAdmin) {
+        return; // Diamkan jika orang lain yang mengetik agar tetap rahasia
+      }
+
+      try {
+        const embedTest = new EmbedBuilder()
+          .setTitle('🧪 UJI COBA: PENGINGAT RENEW BOT-HOSTING')
+          .setDescription(
+            `Halo **${message.author.username}**!\n\n` +
+            'Ini adalah pesan uji coba manual untuk memastikan sistem pengiriman Direct Message (DM) bot bekerja normal.\n\n' +
+            '⚠️ **Server gratis Bot-Hosting wajib di-renew setiap 4 hari sekali.**\n' +
+            `ID Akun Discord Anda: \`${message.author.id}\``
+          )
+          .setColor(0x57F287) // Warna hijau untuk tanda sukses pengujian
+          .addFields(
+            { name: '🌐 Link Dashboard', value: '[Buka Bot-Hosting.net](https://bot-hosting.net)' }
+          )
+          .setFooter({ text: 'Status Uji Coba: Berhasil • Ambanime Bot' })
+          .setTimestamp();
+
+        // Kirim DM langsung ke pengirim perintah (Owner)
+        await message.author.send({ embeds: [embedTest] });
+
+        // Beri respon sukses
+        await message.react('✅').catch(() => {});
+        const info = await message.reply(`📨 Pesan uji coba DM berhasil dikirim ke chat pribadi Anda! *(ID Akun Anda: \`${message.author.id}\`)*`);
+        setTimeout(() => info.delete().catch(() => {}), 6000);
+
+      } catch (err) {
+        console.error('Gagal mengirim testdm ke user:', err);
+        return message.reply('❌ Gagal mengirim DM! Pastikan opsi privasi akun Anda mengizinkan *Direct Messages from server members*.');
+      }
       return;
     }
   } catch (globalErr) {
