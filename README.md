@@ -58,6 +58,13 @@ Prefix Perintah: **`.`** (Titik) — *juga otomatis merespons prefix `!`*
 
 ---
 
+### ⚙️ 7. Kategori Kontrol Perintah (Maintenance)
+- **`.disable <nama_command>`**: Menonaktifkan perintah tertentu sementara tanpa perlu restart bot (misal: `.disable preset`).
+- **`.enable <nama_command>`**: Mengaktifkan kembali perintah yang sebelumnya dinonaktifkan.
+- **Penyimpanan:** Daftar perintah nonaktif tersimpan di database berkas (`disabled_commands.json`) sehingga status nonaktif tetap bertahan meskipun bot di-restart.
+
+---
+
 ### 📁 Pemisahan Channel Logging Otomatis
 - **🗑️ Pesan Terhapus**: Khusus dicatat di channel **`#delete-message`**.
 - **📜 Log Audit Umum**: Log pesan diedit, member join/leave, warn, jail, voice, dan tiket dicatat di **`#admin-logs`**.

@@ -86,6 +86,9 @@ function saveData(filename, data) {
   }
 }
 
+// Tempat Menyimpan Daftar Perintah yang Dinonaktifkan (Persistent Set)
+const disabledCommands = new Set(loadData('disabled_commands.json', []));
+
 // Rekam Statistik Moderator untuk Evaluasi (.modstats)
 function recordModStat(modId, action) {
   if (!modId) return;
@@ -522,6 +525,63 @@ client.on('messageCreate', async (message) => {
     const args = content.slice(usedPrefix.length).trim().split(/\s+/);
     const command = args.shift().toLowerCase();
 
+    // ==========================================
+    // COMMAND KONTROL: .disable & .enable (Khusus Administrator)
+    // ==========================================
+
+    // 1. Matikan Perintah: .disable <nama_command>
+    if (command === 'disable') {
+      if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ Hanya Administrator yang dapat menonaktifkan perintah.');
+      }
+
+      const targetCmd = args[0]?.toLowerCase().replace(/^[.!\/]/, '');
+      if (!targetCmd) {
+        return message.reply(`Sebutkan nama perintah yang ingin dimatikan. Contoh: \`${PREFIX}disable preset\``);
+      }
+
+      // Hindari mematikan perintah kontrol itu sendiri
+      if (['disable', 'enable', 'help'].includes(targetCmd)) {
+        return message.reply('⚠️ Perintah `.disable`, `.enable`, dan `.help` tidak boleh dinonaktifkan.');
+      }
+
+      if (disabledCommands.has(targetCmd)) {
+        return message.reply(`Perintah \`.${targetCmd}\` memang sudah dinonaktifkan sebelumnya.`);
+      }
+
+      disabledCommands.add(targetCmd);
+      saveData('disabled_commands.json', Array.from(disabledCommands));
+      return message.reply(`🚫 Perintah \`.${targetCmd}\` berhasil **dinonaktifkan** sementara.`);
+    }
+
+    // 2. Aktifkan Kembali Perintah: .enable <nama_command>
+    if (command === 'enable') {
+      if (!member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return message.reply('❌ Hanya Administrator yang dapat mengaktifkan perintah.');
+      }
+
+      const targetCmd = args[0]?.toLowerCase().replace(/^[.!\/]/, '');
+      if (!targetCmd) {
+        return message.reply(`Sebutkan nama perintah yang ingin diaktifkan. Contoh: \`${PREFIX}enable preset\``);
+      }
+
+      if (!disabledCommands.has(targetCmd)) {
+        return message.reply(`Perintah \`.${targetCmd}\` sedang aktif dan tidak dalam kondisi nonaktif.`);
+      }
+
+      disabledCommands.delete(targetCmd);
+      saveData('disabled_commands.json', Array.from(disabledCommands));
+      return message.reply(`✅ Perintah \`.${targetCmd}\` berhasil **diaktifkan kembali**.`);
+    }
+
+    // ==========================================
+    // PENGECEKAN BLOKIR (GATEKEEPER)
+    // ==========================================
+    // Jika command yang diketik ada di daftar disabled, batalkan eksekusi
+    if (disabledCommands.has(command)) {
+      return message.reply(`⚠️ Perintah \`.${command}\` sedang dinonaktifkan sementara oleh administrator server.`);
+    }
+
     // ------------------------------------------
     // PERINTAH: help [mod]
     // ------------------------------------------
@@ -579,6 +639,12 @@ client.on('messageCreate', async (message) => {
                 `\`${PREFIX}preset\` / \`${PREFIX}assets\` : Kumpulan link asset font/sfx/preset resmi.\n` +
                 `\`${PREFIX}afk [alasan]\` : Tandai status AFK (auto-respond jika di-tag).\n` +
                 `\`${PREFIX}rep @user [alasan]\` & \`${PREFIX}checkrep @user\` : Poin reputasi anggota.`
+            },
+            {
+              name: '⚙️ 7. Kontrol Perintah (Maintenance)',
+              value:
+                `\`${PREFIX}disable <command>\` : Matikan perintah sementara (Contoh: \`${PREFIX}disable preset\`).\n` +
+                `\`${PREFIX}enable <command>\` : Aktifkan kembali perintah.`
             }
           )
           .setFooter({ text: 'Gunakan wewenang staf dengan bijak.' })
