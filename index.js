@@ -31,7 +31,7 @@ const client = new Client({
 });
 
 // Konfigurasi Bot
-const PREFIX = process.env.PREFIX || '!';
+const PREFIX = process.env.PREFIX || '.';
 const LOG_CHANNEL_NAME = (process.env.LOG_CHANNEL_NAME || 'admin-logs').toLowerCase();
 
 // File Penyimpanan Peringatan (Warn System Persistence)
