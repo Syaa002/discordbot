@@ -1,12 +1,18 @@
 {
   "name": "discordbot",
   "version": "1.0.0",
-  "description": "",
+  "description": "Discord Bot Moderasi, Anti-Spam, Role Otomatis, dan Audit Trail",
   "main": "index.js",
   "scripts": {
+    "start": "node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": [
+    "discord",
+    "moderation",
+    "auto-roles",
+    "audit-logs"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
