@@ -42,6 +42,27 @@ const DELETE_LOG_CHANNEL_NAME = (process.env.DELETE_LOG_CHANNEL_NAME || 'delete-
 const snipes = new Map();
 const editSnipes = new Map();
 const activeMabars = new Map();
+const afkUsers = new Map();
+
+// Helper untuk Mencabut Status AFK & Mengembalikan Nickname
+async function removeAfk(member, reasonMessage = null) {
+  if (!member || !afkUsers.has(member.id)) return;
+
+  const data = afkUsers.get(member.id);
+  afkUsers.delete(member.id);
+
+  // Kembalikan nickname ke nama asli
+  if (member.manageable) {
+    await member.setNickname(data.originalNickname).catch(() => {});
+  }
+
+  const welcomeBack = `👋 Selamat datang kembali, <@${member.id}>! Status AFK kamu telah dicabut.`;
+  if (reasonMessage) {
+    reasonMessage.reply(welcomeBack)
+      .then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000))
+      .catch(() => {});
+  }
+}
 
 // Helper Penyimpanan Berkas JSON
 function loadData(filename, defaultVal = {}) {
@@ -357,6 +378,30 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 // ==========================================
+// EVENT: DETEKSI JOIN VOICE (CABUT STATUS AFK OTOMATIS)
+// ==========================================
+client.on('voiceStateUpdate', async (oldState, newState) => {
+  try {
+    // Cek jika user baru saja masuk ke voice channel (bukan keluar atau sekadar mute)
+    if (!oldState.channelId && newState.channelId) {
+      const member = newState.member;
+      if (member && afkUsers.has(member.id)) {
+        await removeAfk(member);
+        
+        // Kirim notifikasi singkat di text channel voice tersebut jika ada
+        if (newState.channel && newState.channel.isTextBased()) {
+          newState.channel.send(`👋 Selamat datang kembali di voice, <@${member.id}>! Status AFK telah dicabut.`)
+            .then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000))
+            .catch(() => {});
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error di voiceStateUpdate AFK:', err);
+  }
+});
+
+// ==========================================
 // 2. MODERASI, AFK & PERINTAH BOT LENGKAP
 // ==========================================
 client.on('messageCreate', async (message) => {
@@ -370,26 +415,20 @@ client.on('messageCreate', async (message) => {
     // ------------------------------------------
     // SISTEM AFK (Auto-Responder & Auto-Remove)
     // ------------------------------------------
-    const afkData = loadData('afk.json', {});
-
-    // Jika pengirim pesan sebelumnya sedang AFK, cabut status AFK-nya
-    if (afkData[message.author.id]) {
-      const timeSpent = Date.now() - afkData[message.author.id].timestamp;
-      delete afkData[message.author.id];
-      saveData('afk.json', afkData);
-      const welcomeBack = await message.reply(`👋 Selamat datang kembali <@${message.author.id}>! Status AFK kamu telah dicabut (kamu AFK selama **${formatDuration(timeSpent)}**).`).catch(() => {});
-      if (welcomeBack) setTimeout(() => welcomeBack.delete().catch(() => {}), 5000);
+    // 1. Jika user yang sedang AFK mengirim chat (bukan command .afk atau !afk), cabut status AFK-nya
+    if (afkUsers.has(message.author.id) && !content.toLowerCase().startsWith('.afk') && !content.toLowerCase().startsWith('!afk')) {
+      await removeAfk(member, message);
+      return;
     }
 
-    // Jika ada yang me-mention member yang sedang AFK
-    if (message.mentions && message.mentions.users.size > 0) {
-      for (const [userId, user] of message.mentions.users) {
-        if (afkData[userId] && userId !== message.author.id) {
-          const afkInfo = afkData[userId];
-          const timeAgo = Math.floor(afkInfo.timestamp / 1000);
-          message.reply(`💤 **${user.tag}** saat ini sedang AFK: *${afkInfo.reason}* (<t:${timeAgo}:R>)`).catch(() => {});
+    // 2. Cek apakah ada user AFK yang di-mention oleh orang lain
+    if (message.mentions && message.mentions.members && message.mentions.members.size > 0) {
+      message.mentions.members.forEach((mentionedMember) => {
+        if (afkUsers.has(mentionedMember.id) && mentionedMember.id !== message.author.id) {
+          const afkData = afkUsers.get(mentionedMember.id);
+          message.reply(`💤 **${mentionedMember.displayName}** sedang AFK: *${afkData.reason}* (<t:${Math.floor(afkData.time / 1000)}:R>)`).catch(() => {});
         }
-      }
+      });
     }
 
     const isStaff = member.permissions.has(PermissionFlagsBits.ManageMessages) ||
@@ -1449,18 +1488,26 @@ client.on('messageCreate', async (message) => {
 
     // .afk [alasan]
     if (command === 'afk') {
-      const reason = args.join(' ') || 'Sedang sibuk / pergi sebentar';
-      const afkData = loadData('afk.json', {});
-      afkData[message.author.id] = { reason, timestamp: Date.now() };
-      saveData('afk.json', afkData);
+      const reason = args.join(' ') || 'Tanpa alasan';
+      const originalName = member.nickname || member.user.globalName || member.user.username;
 
-      const embed = new EmbedBuilder()
-        .setTitle('💤 Status AFK Diaktifkan')
-        .setColor(0x5865F2)
-        .setDescription(`<@${message.author.id}> sekarang berstatus **AFK**: *${reason}*.\nBot akan otomatis memberitahu member lain yang me-mention kamu.`)
-        .setTimestamp();
+      // Simpan data AFK
+      afkUsers.set(member.id, {
+        reason: reason,
+        time: Date.now(),
+        originalNickname: member.nickname || null // null jika tidak punya nickname server
+      });
 
-      return message.channel.send({ embeds: [embed] });
+      // Ubah nama menjadi [AFK] Nama
+      if (member.manageable) {
+        // Batasi panjang nickname maksimal 32 karakter sesuai limit Discord
+        const newNickname = `[AFK] ${originalName}`.substring(0, 32);
+        await member.setNickname(newNickname).catch(() => {});
+      } else if (message.guild.ownerId === member.id) {
+        message.channel.send('ℹ️ *Catatan: Server Owner tidak dapat diubah nicknamenya oleh bot karena batasan hierarki Discord, tetapi status AFK tetap aktif.*').catch(() => {});
+      }
+
+      return message.reply(`💤 <@${member.id}>, kamu sekarang AFK: **${reason}**.`);
     }
 
     // .rep @user [alasan] & .checkrep @user
