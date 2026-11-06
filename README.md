@@ -8,7 +8,14 @@ Prefix Perintah: **`.`** (Titik) — *juga otomatis merespons prefix `!`*
 
 ## 🌟 Ringkasan Fitur Master
 
-### 🚪 1. Kategori Akses, Gerbang Server & Verifikasi (Gatekeeping)
+### 🧹 1. Kategori Pembersihan Pesan & Kontrol Chat
+- **`.delete [1-100]` / `.clear` / `.purge` / `.hapus`**: Menghapus pesan massal di channel secara instan.
+- **`.slowmode [detik]`**: Mengatur jeda pengiriman pesan (misal `.slowmode 5` atau `.slowmode 0` untuk mematikan).
+- **`.lock` & `.unlock`**: Mengunci atau membuka kembali channel obrolan saat ini.
+
+---
+
+### 🚪 2. Kategori Akses, Gerbang Server & Verifikasi (Gatekeeping)
 - **`.setupverify`**: Mengirim panel verifikasi rules. Member baru menekan tombol untuk mengambil role **`CLUB`**, yang secara otomatis membuka akses seluruh channel kategori `COMMUNITY`.
 - **`.lockdown` & `.unlockdown`**: Mengunci seluruh channel obrolan server secara instan saat terjadi serangan/raid darurat, dan membukanya kembali setelah situasi aman.
 - **`.syncperms [#channel]`**: Menyamakan izin (*permissions*) suatu channel dengan kategori induknya secara otomatis.

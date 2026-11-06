@@ -197,14 +197,28 @@ function detectBadWord(text) {
 // ==========================================
 // EVENT: BOT SIAP & ONLINE
 // ==========================================
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`========================================`);
   console.log(`✅ Bot berhasil online sebagai: ${client.user.tag}`);
   console.log(`⚙️ Prefix perintah: ${PREFIX} (juga mendukung !)`);
   console.log(`📋 Channel log umum: #${LOG_CHANNEL_NAME}`);
   console.log(`🗑️ Channel log pesan terhapus: #${DELETE_LOG_CHANNEL_NAME}`);
-  console.log(`🚀 Seluruh 6 Kategori Fitur Staf & Komunitas: AKTIF`);
+  console.log(`🚀 Seluruh Kategori Fitur Staf & Komunitas: AKTIF`);
   console.log(`========================================`);
+
+  // Pre-fetch pesan terakhir dari setiap text channel agar tersimpan di cache Discord.js
+  for (const [, guild] of client.guilds.cache) {
+    try {
+      const textChannels = guild.channels.cache.filter(
+        c => c.isTextBased() && c.type === ChannelType.GuildText
+      );
+      for (const [, ch] of textChannels) {
+        ch.messages.fetch({ limit: 50 }).catch(() => {});
+      }
+    } catch (e) {
+      console.error('Gagal pre-cache messages:', e);
+    }
+  }
 });
 
 // ==========================================
@@ -213,18 +227,21 @@ client.once('ready', () => {
 
 // Log: Pesan Dihapus -> Dikirim ke #delete-message + Deteksi Ghost Ping
 client.on('messageDelete', async (message) => {
-  if (!message.guild || message.author?.bot) return;
+  if (!message.guild) return;
+  if (message.author?.bot) return;
 
-  // Simpan data pesan terakhir untuk perintah .snipe
-  snipes.set(message.channel.id, {
-    content: message.content || '',
-    author: message.author,
-    attachments: message.attachments ? message.attachments.map(a => a.url) : [],
-    timestamp: Date.now()
-  });
+  // Simpan data pesan terakhir untuk perintah .snipe jika author diketahui
+  if (message.author) {
+    snipes.set(message.channel.id, {
+      content: message.content || '',
+      author: message.author,
+      attachments: message.attachments ? message.attachments.map(a => a.url) : [],
+      timestamp: Date.now()
+    });
+  }
 
   // Fitur Deteksi Ghost Ping Otomatis
-  if (message.mentions && message.mentions.users.size > 0) {
+  if (message.author && message.mentions && message.mentions.users.size > 0) {
     const validMentions = message.mentions.users.filter(u => u.id !== message.author.id && !u.bot);
     if (validMentions.size > 0) {
       const mentionList = validMentions.map(u => `<@${u.id}>`).join(', ');
@@ -244,26 +261,70 @@ client.on('messageDelete', async (message) => {
     }
   }
 
-  const content = message.content 
+  // Cek Audit Log jika pesan dihapus oleh Moderator
+  let deleter = null;
+  let auditAuthor = null;
+  try {
+    if (message.guild.members.me?.permissions.has(PermissionFlagsBits.ViewAuditLog)) {
+      const fetchedLogs = await message.guild.fetchAuditLogs({
+        limit: 1,
+        type: AuditLogEvent.MessageDelete
+      }).catch(() => null);
+
+      if (fetchedLogs) {
+        const logEntry = fetchedLogs.entries.first();
+        if (logEntry && (Date.now() - logEntry.createdTimestamp < 4000)) {
+          if (logEntry.extra?.channel?.id === message.channel.id) {
+            if (logEntry.executor && logEntry.executor.id !== message.author?.id) {
+              deleter = `${logEntry.executor.tag} (<@${logEntry.executor.id}>)`;
+            }
+            if (logEntry.target) {
+              auditAuthor = `${logEntry.target.tag} (<@${logEntry.target.id}>)`;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {}
+
+  let authorDisplay = message.author 
+    ? `${message.author.tag} (<@${message.author.id}>)` 
+    : (auditAuthor || '*Tidak diketahui (Pesan lama sebelum bot aktif)*');
+
+  let content = message.content 
     ? (message.content.length > 1024 ? message.content.substring(0, 1020) + '...' : message.content)
-    : '*[Tidak ada teks / pesan kosong]*';
+    : null;
+
+  if (!content) {
+    if (message.attachments && message.attachments.size > 0) {
+      content = '*[Pesan berupa gambar / lampiran berkas]*';
+    } else {
+      content = '*[Pesan dikirim sebelum bot aktif sehingga tidak ada teks di cache]*';
+    }
+  }
 
   const embed = new EmbedBuilder()
     .setTitle('🗑️ Pesan Dihapus')
     .setColor(0xED4245)
     .addFields(
-      { name: 'Pengirim', value: message.author ? `${message.author.tag} (<@${message.author.id}>)` : '*Tidak diketahui*', inline: true },
-      { name: 'Channel', value: `${message.channel}`, inline: true },
-      { name: 'Isi Pesan', value: content }
-    )
-    .setTimestamp();
+      { name: 'Pengirim', value: authorDisplay, inline: true },
+      { name: 'Channel', value: `${message.channel}`, inline: true }
+    );
+
+  if (deleter) {
+    embed.addFields({ name: 'Dihapus Oleh (Mod)', value: deleter, inline: true });
+  }
+
+  embed.addFields({ name: 'Isi Pesan', value: content });
 
   if (message.attachments && message.attachments.size > 0) {
     const attachmentNames = message.attachments.map(a => a.name || 'File').join(', ');
     embed.addFields({ name: '📎 Lampiran', value: attachmentNames.substring(0, 1024) });
   }
 
-  // Kirim log khusus ke #delete-message
+  embed.setTimestamp();
+
+  // Kirim log khusus ke #delete-message (fallback ke #admin-logs)
   await sendDeleteLog(message.guild, embed);
 });
 
@@ -593,59 +654,69 @@ client.on('messageCreate', async (message) => {
         const modEmbed = new EmbedBuilder()
           .setTitle('🛡️ Panel Panduan Terpadu Staf & Moderator (Ambanime Bot)')
           .setColor(0xED4245)
-          .setDescription('Panduan referensi cepat seluruh utilitas internal staf:')
+          .setDescription(`Panduan referensi cepat seluruh wewenang & utilitas internal staf (Prefix: \`${PREFIX}\`):`)
           .addFields(
             {
-              name: '🚪 1. Gerbang Server & Verifikasi',
+              name: '🧹 1. Pembersihan Pesan (Chat Control)',
               value:
-                `\`${PREFIX}setupverify\` : Buat panel verifikasi rules (Role CLUB).\n` +
-                `\`${PREFIX}lockdown\` / \`${PREFIX}unlockdown\` : Kunci / buka seluruh channel saat raid darurat.\n` +
+                `\`${PREFIX}delete [1-100]\` / \`${PREFIX}clear\` / \`${PREFIX}purge\` : Hapus pesan massal sekaligus di channel ini (Contoh: \`${PREFIX}delete 20\`).\n` +
+                `\`${PREFIX}slowmode [detik]\` : Atur jeda kirim pesan channel (Contoh: \`${PREFIX}slowmode 5\` | \`${PREFIX}slowmode 0\` untuk off).`
+            },
+            {
+              name: '🔍 2. Investigasi Pesan & Anti-Spam',
+              value:
+                `\`${PREFIX}snipe\` : Munculkan kembali pesan terakhir yang baru saja terhapus.\n` +
+                `\`${PREFIX}editsnipe\` : Munculkan teks asli pesan sebelum diedit pengirimnya.\n` +
+                `\`${PREFIX}checkalt [hari]\` : Pindai akun tuyul/mencurigakan berumur kurang dari N hari (default 7 hari).\n` +
+                `*Anti-Ghostping aktif otomatis membongkar yang tag lalu hapus pesan.*`
+            },
+            {
+              name: '⚖️ 3. Tindakan Disiplin Member',
+              value:
+                `\`${PREFIX}warn @user [alasan]\` : Tambah teguran (3x warn = timeout 1 jam, 5x warn = kick).\n` +
+                `\`${PREFIX}checkwarn @user\` : Cek total peringatan & riwayat teguran member.\n` +
+                `\`${PREFIX}clearwarn @user\` : Reset/hapus seluruh poin teguran member.\n` +
+                `\`${PREFIX}timeout @user [waktu] [alasan]\` : Bisukan member (Contoh: \`${PREFIX}timeout @user 10m Spam\`).\n` +
+                `\`${PREFIX}untimeout @user\` : Cabut status timeout member.\n` +
+                `\`${PREFIX}softban @user [alasan]\` : Bersihkan riwayat chat 24 jam member lalu kick dari server.\n` +
+                `\`${PREFIX}kick @user [alasan]\` : Keluarkan member dari server.\n` +
+                `\`${PREFIX}ban @user [alasan]\` / \`${PREFIX}unban [id]\` : Ban / unban member.`
+            },
+            {
+              name: '🚨 4. Panel Taktis & Ruang Sidang (Jail)',
+              value:
+                `\`${PREFIX}modpanel @user\` : Buka kartu aksi cepat tombol interaktif (Mute 10m, Warn, Kick, Ban).\n` +
+                `\`${PREFIX}jail @user [alasan]\` : Cabut seluruh role & karantina member ke #ruang-sidang.\n` +
+                `\`${PREFIX}unjail @user\` : Kembalikan seluruh role asli member setelah sidang usai.`
+            },
+            {
+              name: '🎙️ 5. Manajemen Voice Staf & Ruang Tunggu',
+              value:
+                `\`${PREFIX}vckick @user\` : Putus koneksi (disconnect) paksa member dari voice.\n` +
+                `\`${PREFIX}vcmute @user\` / \`${PREFIX}vcunmute @user\` : Server-mute / unmute mic member di voice.\n` +
+                `\`${PREFIX}vcmove @user [nama/id channel]\` : Pindahkan member antar ruang suara.\n` +
+                `\`${PREFIX}next\` : Tarik otomatis member antrean paling atas dari Ruang Tunggu ke AdminVoice.`
+            },
+            {
+              name: '🚪 6. Gerbang Server & Keamanan Darurat',
+              value:
+                `\`${PREFIX}setupverify\` : Buat panel tombol verifikasi rules (Role CLUB).\n` +
+                `\`${PREFIX}lockdown\` / \`${PREFIX}unlockdown\` : Kunci / buka seluruh channel saat serangan raid darurat.\n` +
+                `\`${PREFIX}lock\` / \`${PREFIX}unlock\` : Kunci / buka channel obrolan saat ini.\n` +
                 `\`${PREFIX}syncperms [#channel]\` : Sinkronisasi izin channel ke kategori induknya.`
             },
             {
-              name: '🔎 2. Investigasi Cepat & Mod Utilities',
+              name: '📢 7. Komunikasi & Evaluasi Staf',
               value:
-                `\`${PREFIX}snipe\` : Lihat pesan terakhir yang dihapus.\n` +
-                `\`${PREFIX}editsnipe\` : Lihat isi pesan asli sebelum diedit.\n` +
-                `\`${PREFIX}checkalt [hari]\` : Pindai akun baru di server (default 7 hari).\n` +
-                `\`${PREFIX}slowmode [detik]\` : Atur jeda slowmode obrolan.\n` +
-                `*Anti-Ghostping aktif otomatis membongkar yang tag lalu hapus chat.*`
+                `\`${PREFIX}say [pesan]\` : Kirim pesan pengumuman atas nama bot di channel ini.\n` +
+                `\`${PREFIX}dm @user [pesan]\` : Kirim teguran privat resmi via DM bot tanpa gaduh di publik.\n` +
+                `\`${PREFIX}modstats [@user]\` : Rekap statistik keaktifan moderasi untuk evaluasi OWNER (KING'S).`
             },
             {
-              name: '⚖️ 3. Disiplin & Karantina Lanjutan',
-              value:
-                `\`${PREFIX}modpanel @user\` : Panel interaktif tombol aksi cepat (Mute, Warn, Kick, Ban).\n` +
-                `\`${PREFIX}jail @user [alasan]\` & \`${PREFIX}unjail @user\` : Karantina member ke ruang sidang.\n` +
-                `\`${PREFIX}softban @user [alasan]\` : Bersihkan chat 24 jam & kick.\n` +
-                `\`${PREFIX}dm @user [pesan]\` : Kirim teguran privat resmi via bot.`
-            },
-            {
-              name: '🎙️ 4. Voice Staf & Waiting Room',
-              value:
-                `\`${PREFIX}vckick @user\` : Disconnect paksa member dari voice.\n` +
-                `\`${PREFIX}vcmute @user\` / \`${PREFIX}vcunmute @user\` : Server-mute mic member.\n` +
-                `\`${PREFIX}vcmove @user [channel]\` : Pindahkan member antar-channel.\n` +
-                `\`${PREFIX}next\` : Tarik otomatis member antrean terdepan dari Ruang Tunggu ke AdminVoice.`
-            },
-            {
-              name: '📊 5. Evaluasi Internal Staf',
-              value:
-                `\`${PREFIX}modstats [@mod]\` : Tampilkan rekap keaktifan moderasi untuk evaluasi OWNER (KING'S).`
-            },
-            {
-              name: '🎮 6. Komunitas & Gaming',
-              value:
-                `\`${PREFIX}mabar [game] [slot]\` : Buat ajakan mabar interaktif dengan tombol join.\n` +
-                `\`${PREFIX}rate\` : Buat thread polling rating karya AMV/desain.\n` +
-                `\`${PREFIX}preset\` / \`${PREFIX}assets\` : Kumpulan link asset font/sfx/preset resmi.\n` +
-                `\`${PREFIX}afk [alasan]\` : Tandai status AFK (auto-respond jika di-tag).\n` +
-                `\`${PREFIX}rep @user [alasan]\` & \`${PREFIX}checkrep @user\` : Poin reputasi anggota.`
-            },
-            {
-              name: '⚙️ 7. Kontrol Perintah (Maintenance)',
+              name: '⚙️ 8. Kontrol Sistem Bot (Maintenance)',
               value:
                 `\`${PREFIX}disable <command>\` : Matikan perintah sementara (Contoh: \`${PREFIX}disable preset\`).\n` +
-                `\`${PREFIX}enable <command>\` : Aktifkan kembali perintah.`
+                `\`${PREFIX}enable <command>\` : Aktifkan kembali perintah yang dimatikan.`
             }
           )
           .setFooter({ text: 'Gunakan wewenang staf dengan bijak.' })
@@ -655,28 +726,43 @@ client.on('messageCreate', async (message) => {
       }
 
       const helpEmbed = new EmbedBuilder()
-        .setTitle('🌟 Panduan Perintah Komunitas Ambanime')
+        .setTitle('🌟 Panduan Perintah Komunitas — AMBANIME BOT')
         .setColor(0x5865F2)
-        .setDescription('Selamat datang di bot server! Berikut daftar perintah yang tersedia untuk member:')
+        .setDescription(`Gunakan prefix \`${PREFIX}\` sebelum mengetik perintah. Berikut daftar kategori perintah:`)
         .addFields(
           {
-            name: '🎮 Fitur Komunitas & Hiburan',
+            name: '🎮 1. Gaming & Mabar',
             value:
-              `\`${PREFIX}mabar [Game] [Slot]\` : Buat ajakan mabar interaktif (Contoh: \`${PREFIX}mabar MLBB 5\`).\n` +
-              `\`${PREFIX}afk [alasan]\` : Menandai status AFK.\n` +
-              `\`${PREFIX}snipe\` : Melihat pesan yang baru saja dihapus di channel ini.\n` +
-              `\`${PREFIX}editsnipe\` : Melihat isi pesan sebelum diedit.\n` +
-              `\`${PREFIX}rep @user [alasan]\` : Berikan +1 poin respect/reputasi ke member lain.\n` +
-              `\`${PREFIX}checkrep @user\` : Cek total reputasi member.\n` +
-              `\`${PREFIX}preset\` / \`${PREFIX}assets\` : Dapatkan link bahan editing AMV & desain.`
+              `\`${PREFIX}mabar [Game] [Slot]\` : Buat ajakan mabar interaktif dengan tombol join (Contoh: \`${PREFIX}mabar MLBB 5\`).\n` +
+              `\`${PREFIX}afk [alasan]\` : Pasang status AFK & auto-ubah nickname. Auto-cabut saat chat/masuk voice.`
           },
           {
-            name: '🎫 Bantuan & Tiket Staf',
-            value: `\`${PREFIX}setupticket\` : Munculkan panel tiket bantuan staf.`
+            name: '💬 2. Utilitas Chat & Pesan',
+            value:
+              `\`${PREFIX}snipe\` : Menampilkan pesan yang baru saja terhapus di channel ini.\n` +
+              `\`${PREFIX}editsnipe\` : Menampilkan isi teks asli dari pesan sebelum diedit.`
           },
           {
-            name: '🛡️ Menu Khusus Staf & Moderator',
-            value: `Ketik **\`${PREFIX}help mod\`** untuk membuka seluruh panduan perintah staf (ModPanel, Jail, Softban, Voice Control, Waiting Room, ModStats, dll).`
+            name: '⭐ 3. Reputasi & Apresiasi Anggota',
+            value:
+              `\`${PREFIX}rep @user [alasan]\` : Berikan +1 poin respect/reputasi ke member lain yang membantu.\n` +
+              `\`${PREFIX}checkrep [@user]\` : Cek total poin reputasi kamu atau member lain.`
+          },
+          {
+            name: '🎨 4. Konten Kreator & Editor AMV',
+            value:
+              `\`${PREFIX}preset\` / \`${PREFIX}assets\` : Dapatkan link resmi kumpulan font, SFX, dan preset video.\n` +
+              `\`${PREFIX}rate\` : Buat thread polling rating untuk karya AMV / desain grafis kamu.`
+          },
+          {
+            name: '🎫 5. Layanan Bantuan Server',
+            value:
+              `\`${PREFIX}setupticket\` : Munculkan panel tiket untuk membuka ruang lapor staf privat.`
+          },
+          {
+            name: '🛡️ 6. Akses Khusus Moderator & Admin',
+            value:
+              `Ketik **\`${PREFIX}help mod\`** untuk membuka seluruh 8 kategori perintah staf (ModPanel, Delete/Clear, Jail, Softban, Voice Control, Alt Detection, dll).`
           }
         )
         .setFooter({ text: 'Ambanime Official Bot' })
@@ -1717,16 +1803,28 @@ client.on('messageCreate', async (message) => {
       return;
     }
 
-    if (command === 'clear' || command === 'purge') {
-      if (!member.permissions.has(PermissionFlagsBits.ManageMessages)) return message.reply('❌ Izin ditolak.');
+    if (command === 'clear' || command === 'purge' || command === 'delete' || command === 'hapus') {
+      if (!member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+        return message.reply('❌ Anda tidak memiliki izin **Manage Messages**.');
+      }
+      if (!message.guild.members.me.permissionsIn(message.channel).has(PermissionFlagsBits.ManageMessages)) {
+        return message.reply('❌ Bot kekurangan izin **Manage Messages** di channel ini.');
+      }
       const amount = parseInt(args[0], 10);
-      if (isNaN(amount) || amount < 1 || amount > 100) return message.reply('⚠️ Masukkan jumlah 1 - 100.');
+      if (isNaN(amount) || amount < 1 || amount > 100) {
+        return message.reply(`⚠️ Masukkan jumlah pesan yang valid (1 - 100). Contoh: \`${PREFIX}delete 10\` atau \`${PREFIX}clear 25\``);
+      }
+
       await message.delete().catch(() => {});
-      const deleted = await message.channel.bulkDelete(amount, true).catch(() => null);
-      if (deleted) {
+      try {
+        const deleted = await message.channel.bulkDelete(amount, true);
         recordModStat(message.author.id, 'clear');
-        const notif = await message.channel.send(`✅ Berhasil membersihkan **${deleted.size}** pesan.`);
+        const notif = await message.channel.send(`✅ Berhasil menghapus **${deleted.size}** pesan.`);
         setTimeout(() => notif.delete().catch(() => {}), 4000);
+      } catch (err) {
+        console.error('Error saat bulkDelete:', err);
+        const failMsg = await message.channel.send('⚠️ Gagal menghapus pesan. Catatan: Discord membatasi bot hanya dapat menghapus massal pesan yang usianya kurang dari 14 hari.');
+        setTimeout(() => failMsg.delete().catch(() => {}), 6000);
       }
       return;
     }
