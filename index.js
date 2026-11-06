@@ -11,7 +11,12 @@ const {
   ButtonStyle, 
   EmbedBuilder 
 } = require('discord.js');
-const cron = require('node-cron');
+let cron = null;
+try {
+  cron = require('node-cron');
+} catch (e) {
+  // node-cron tidak terpasang di host, sistem otomatis beralih ke native timer bawaan Node.js
+}
 const fs = require('fs');
 const path = require('path');
 
@@ -224,18 +229,18 @@ client.once('ready', async () => {
 
   // ==========================================
   // JADWAL PENGINGAT RENEW KE DM PRIBADI OWNER (Setiap Hari Pukul 12:00 WIB)
-  // Format cron: menit jam hari bulan hari_dalam_minggu
   // ==========================================
-  cron.schedule('0 12 * * *', async () => {
+  async function sendRenewNotification(source = 'Otomatis') {
     try {
       let targetUser = null;
 
       // 1. Ambil akun berdasarkan OWNER_USER_ID jika dikonfigurasi
-      if (OWNER_USER_ID && OWNER_USER_ID.length > 10) {
-        targetUser = await client.users.fetch(OWNER_USER_ID).catch(() => null);
+      const cleanOwnerId = (OWNER_USER_ID || '').trim().replace(/['"]/g, '');
+      if (cleanOwnerId && cleanOwnerId.length > 10 && cleanOwnerId !== 'MASUKKAN_ID_DISCORD_ANDA_DI_SINI') {
+        targetUser = await client.users.fetch(cleanOwnerId).catch(() => null);
       }
 
-      // 2. Fallback otomatis ke Server Owner jika OWNER_USER_ID belum diisi
+      // 2. Fallback otomatis ke Server Owner jika OWNER_USER_ID belum diisi / tidak valid
       if (!targetUser) {
         for (const [, guild] of client.guilds.cache) {
           try {
@@ -249,7 +254,7 @@ client.once('ready', async () => {
       }
 
       if (!targetUser) {
-        console.warn('[Cron] Pengingat renew: Akun Owner tidak ditemukan.');
+        console.warn('[Renew Reminder] Akun Owner tidak ditemukan.');
         return;
       }
 
@@ -265,17 +270,38 @@ client.once('ready', async () => {
         .addFields(
           { name: '🌐 Link Dashboard', value: '[Buka Bot-Hosting.net](https://bot-hosting.net)' }
         )
-        .setFooter({ text: 'Notifikasi Otomatis Ambanime Bot' })
+        .setFooter({ text: `Notifikasi ${source} • Ambanime Bot` })
         .setTimestamp();
 
       await targetUser.send({ embeds: [embed] });
-      console.log(`[Cron] Pengingat renew harian berhasil dikirim ke DM: ${targetUser.tag}`);
+      console.log(`[Renew Reminder] Notifikasi (${source}) berhasil dikirim ke DM: ${targetUser.tag}`);
     } catch (err) {
       console.error('Gagal mengirim DM pengingat renew ke Owner:', err);
     }
-  }, {
-    timezone: "Asia/Jakarta" // Waktu Indonesia Barat (WIB)
-  });
+  }
+
+  // Penjadwalan: Jika library cron ada gunakan cron, jika tidak ada gunakan timer internal Node.js
+  if (cron) {
+    cron.schedule('0 12 * * *', () => sendRenewNotification('Harian (Cron)'), {
+      timezone: "Asia/Jakarta"
+    });
+    console.log('⏰ Penjadwal Renew: Menggunakan node-cron (Setiap 12:00 WIB)');
+  } else {
+    let lastNotifiedDay = -1;
+    setInterval(() => {
+      const now = new Date();
+      const currentDay = now.getUTCDate();
+      const utcHours = now.getUTCHours();
+      const utcMinutes = now.getUTCMinutes();
+
+      // 12:00 WIB = 05:00 UTC
+      if (utcHours === 5 && utcMinutes === 0 && lastNotifiedDay !== currentDay) {
+        lastNotifiedDay = currentDay;
+        sendRenewNotification('Harian (Native Timer)');
+      }
+    }, 60 * 1000);
+    console.log('⏰ Penjadwal Renew: Menggunakan timer native Node.js (Setiap 12:00 WIB)');
+  }
 });
 
 // ==========================================
@@ -691,6 +717,71 @@ client.on('messageCreate', async (message) => {
       disabledCommands.delete(targetCmd);
       saveData('disabled_commands.json', Array.from(disabledCommands));
       return message.reply(`✅ Perintah \`.${targetCmd}\` berhasil **diaktifkan kembali**.`);
+    }
+
+    // ==========================================
+    // PERINTAH: .cekrenew (Tautan Perpanjangan Bot-Hosting)
+    // ==========================================
+    if (command === 'cekrenew') {
+      const embed = new EmbedBuilder()
+        .setTitle('🔗 Tautan Perpanjangan Bot-Hosting')
+        .setDescription(
+          'Pastikan untuk selalu memperpanjang masa aktif server sebelum timer 4 hari habis:\n\n' +
+          '👉 [Buka Panel Bot-Hosting](https://bot-hosting.net)\n\n' +
+          '*Tips: Masuk ke menu dashboard, pilih proyek Ambanime, lalu klik tombol **Renew / Extend**.*'
+        )
+        .setColor(0x5865F2)
+        .setFooter({ text: 'Ambanime Bot • Bot-Hosting Reminder' })
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
+    }
+
+    // ==========================================
+    // SECRET COMMAND: .testdm (Uji Coba Kirim DM Pengingat)
+    // Perintah rahasia: Tidak dicatat di menu .help
+    // ==========================================
+    if (command === 'testdm') {
+      const cleanOwnerId = (OWNER_USER_ID || '').trim().replace(/['"]/g, '');
+      const isOwnerMatch = cleanOwnerId && cleanOwnerId === message.author.id;
+      const isServerOwner = message.guild?.ownerId === message.author.id;
+      const isStaffMember = member.permissions.has(PermissionFlagsBits.Administrator) ||
+                            member.permissions.has(PermissionFlagsBits.ManageGuild) ||
+                            member.permissions.has(PermissionFlagsBits.ManageMessages);
+
+      // Hanya izinkan Owner terdaftar, Pemilik Server, atau Staf Pengurus
+      if (!isOwnerMatch && !isServerOwner && !isStaffMember) {
+        return; // Member biasa diabaikan agar tetap rahasia
+      }
+
+      try {
+        const embedTest = new EmbedBuilder()
+          .setTitle('🧪 UJI COBA: PENGINGAT RENEW BOT-HOSTING')
+          .setDescription(
+            `Halo **${message.author.username}**!\n\n` +
+            'Ini adalah pesan uji coba manual untuk memastikan sistem pengiriman Direct Message (DM) bot bekerja normal.\n\n' +
+            '⚠️ **Server gratis Bot-Hosting wajib di-renew setiap 4 hari sekali.**\n\n' +
+            `🆔 **ID Akun Discord Anda:** \`${message.author.id}\``
+          )
+          .setColor(0x57F287) // Warna hijau tanda sukses
+          .addFields(
+            { name: '🌐 Link Dashboard', value: '[Buka Bot-Hosting.net](https://bot-hosting.net)' }
+          )
+          .setFooter({ text: 'Status Uji Coba: Berhasil • Ambanime Bot' })
+          .setTimestamp();
+
+        // Kirim DM langsung ke pengirim perintah
+        await message.author.send({ embeds: [embedTest] });
+
+        await message.react('✅').catch(() => {});
+        const info = await message.reply(`📨 Pesan uji coba DM berhasil dikirim ke chat pribadi Anda! *(ID Akun Anda: \`${message.author.id}\`)*`);
+        setTimeout(() => info.delete().catch(() => {}), 6000);
+
+      } catch (err) {
+        console.error('Gagal mengirim testdm ke user:', err);
+        return message.reply('❌ Gagal mengirim DM! Pastikan opsi privasi akun Anda mengizinkan *Direct Messages from server members* (User Settings > Privacy & Safety).');
+      }
+      return;
     }
 
     // ==========================================
@@ -1955,67 +2046,6 @@ client.on('messageCreate', async (message) => {
       );
       await message.channel.send({ embeds: [ticketEmbed], components: [row] });
       await message.delete().catch(() => {});
-      return;
-    }
-
-    // ==========================================
-    // PERINTAH: .cekrenew (Tautan Perpanjangan Bot-Hosting)
-    // ==========================================
-    if (command === 'cekrenew') {
-      const embed = new EmbedBuilder()
-        .setTitle('🔗 Tautan Perpanjangan Bot-Hosting')
-        .setDescription(
-          'Pastikan untuk selalu memperpanjang masa aktif server sebelum timer 4 hari habis:\n\n' +
-          '👉 [Buka Panel Bot-Hosting](https://bot-hosting.net)\n\n' +
-          '*Tips: Masuk ke menu dashboard, pilih proyek Ambanime, lalu klik tombol **Renew / Extend**.*'
-        )
-        .setColor(0x5865F2)
-        .setFooter({ text: 'Ambanime Bot • Bot-Hosting Reminder' })
-        .setTimestamp();
-
-      return message.reply({ embeds: [embed] });
-    }
-
-    // ==========================================
-    // SECRET COMMAND: .testdm (Uji Coba Kirim DM Pengingat)
-    // Perintah rahasia: Tidak dicatat di menu .help
-    // ==========================================
-    if (command === 'testdm') {
-      const isConfiguredOwner = OWNER_USER_ID && OWNER_USER_ID.length > 10 && message.author.id === OWNER_USER_ID;
-      const isAdmin = message.member?.permissions.has(PermissionFlagsBits.Administrator);
-
-      if (!isConfiguredOwner && !isAdmin) {
-        return; // Diamkan jika orang lain yang mengetik agar tetap rahasia
-      }
-
-      try {
-        const embedTest = new EmbedBuilder()
-          .setTitle('🧪 UJI COBA: PENGINGAT RENEW BOT-HOSTING')
-          .setDescription(
-            `Halo **${message.author.username}**!\n\n` +
-            'Ini adalah pesan uji coba manual untuk memastikan sistem pengiriman Direct Message (DM) bot bekerja normal.\n\n' +
-            '⚠️ **Server gratis Bot-Hosting wajib di-renew setiap 4 hari sekali.**\n' +
-            `ID Akun Discord Anda: \`${message.author.id}\``
-          )
-          .setColor(0x57F287) // Warna hijau untuk tanda sukses pengujian
-          .addFields(
-            { name: '🌐 Link Dashboard', value: '[Buka Bot-Hosting.net](https://bot-hosting.net)' }
-          )
-          .setFooter({ text: 'Status Uji Coba: Berhasil • Ambanime Bot' })
-          .setTimestamp();
-
-        // Kirim DM langsung ke pengirim perintah (Owner)
-        await message.author.send({ embeds: [embedTest] });
-
-        // Beri respon sukses
-        await message.react('✅').catch(() => {});
-        const info = await message.reply(`📨 Pesan uji coba DM berhasil dikirim ke chat pribadi Anda! *(ID Akun Anda: \`${message.author.id}\`)*`);
-        setTimeout(() => info.delete().catch(() => {}), 6000);
-
-      } catch (err) {
-        console.error('Gagal mengirim testdm ke user:', err);
-        return message.reply('❌ Gagal mengirim DM! Pastikan opsi privasi akun Anda mengizinkan *Direct Messages from server members*.');
-      }
       return;
     }
   } catch (globalErr) {
