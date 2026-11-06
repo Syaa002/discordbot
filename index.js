@@ -5,6 +5,7 @@ const {
   Partials, 
   PermissionFlagsBits, 
   ChannelType,
+  AuditLogEvent,
   ActionRowBuilder, 
   ButtonBuilder, 
   ButtonStyle, 
