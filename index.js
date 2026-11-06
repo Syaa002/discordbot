@@ -18,7 +18,7 @@ const client = new Client({
   ]
 });
 
-// Nama channel log untuk mencatat aktivitas server
+// Nama channel log untuk mencatat pesan terhapus
 const LOG_CHANNEL_NAME = 'admin-logs';
 
 client.once('ready', () => {
@@ -56,7 +56,6 @@ client.on('messageCreate', async (message) => {
   // --- ANTI-INVITE FILTER ---
   const inviteRegex = /(https?:\/\/)?(www\.)?(discord\.(gg|io|me|li)|discordapp\.com\/invite)\/[a-zA-Z0-9]+/gi;
   if (inviteRegex.test(message.content)) {
-    // Abaikan jika yang mengirim adalah Admin/Moderator (Manage Messages)
     if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
       await message.delete().catch(() => {});
       const warn = await message.channel.send(`⚠️ ${message.author}, dilarang membagikan link invite server lain di sini!`);
@@ -122,7 +121,7 @@ client.on('messageCreate', async (message) => {
     const reason = args.slice(2).join(' ') || 'Melanggar aturan komunitas';
 
     if (!target) return message.reply('Sebutkan member yang ingin di-kick. Contoh: `!kick @user Spam`');
-    if (!target.kickable) return message.reply('Bot tidak bisa meng-kick member ini (posisi role terlalu tinggi).');
+    if (!target.kickable) return message.reply('Bot tidak bisa meng-kick member ini.');
 
     try {
       await target.kick(reason);
@@ -152,32 +151,38 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // COMMAND 5: !setuproles (Menampilkan panel tombol ambil role)
+  // COMMAND 5: !setuproles (Embed & Tombol Khusus Role Komunitas)
   if (command === 'setuproles') {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
       return message.reply('❌ Hanya Administrator yang bisa menggunakan perintah ini.');
     }
 
     const embed = new EmbedBuilder()
-      .setTitle('🎭 Pilih Peran Komunitas Anda')
-      .setDescription('Klik tombol di bawah ini untuk mengambil atau melepas role minat Anda. Anda akan mendapatkan tag/notifikasi sesuai kategori yang dipilih!')
-      .setColor(0x5865F2);
+      .setTitle('🃏 AMBANIME ROLES SELECTION')
+      .setDescription(
+        'Silakan ambil peran Anda dengan menekan tombol di bawah ini:\n\n' +
+        '♧ • **CLUB** : Verifikasi Member\n' +
+        '♢ • **DIAMOND** : Creator / Influencer / Editor\n' +
+        '♡ • **HEART** : Gamer / Streamer\n\n' +
+        '*Klik tombol sekali untuk mengambil, klik lagi jika ingin melepas role.*'
+      )
+      .setColor(0x2B2D31);
 
     const buttons = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId('role_gamer')
-        .setLabel('Gamer')
-        .setEmoji('🎮')
+        .setCustomId('role_club')
+        .setLabel('CLUB (Member)')
+        .setEmoji('♧')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('role_diamond')
+        .setLabel('DIAMOND (Creator/Editor)')
+        .setEmoji('♢')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
-        .setCustomId('role_anime')
-        .setLabel('Wibu / Anime')
-        .setEmoji('🍿')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId('role_editor')
-        .setLabel('Editor')
-        .setEmoji('🎬')
+        .setCustomId('role_heart')
+        .setLabel('HEART (Gamer/Streamer)')
+        .setEmoji('♡')
         .setStyle(ButtonStyle.Danger)
     );
 
@@ -192,33 +197,50 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
-  const roleMap = {
-    'role_gamer': 'Gamer',
-    'role_anime': 'Anime',
-    'role_editor': 'Editor'
+  // Keyword pencocokan nama role di server Discord
+  const roleKeywords = {
+    'role_club': 'CLUB',
+    'role_diamond': 'DIAMOND',
+    'role_heart': 'HEART'
   };
 
-  const roleName = roleMap[interaction.customId];
-  if (!roleName) return;
+  const keyword = roleKeywords[interaction.customId];
+  if (!keyword) return;
 
-  const role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === roleName.toLowerCase());
+  // Mencari role yang mengandung kata kunci (misal: "♧ • Roles CLUB")
+  const role = interaction.guild.roles.cache.find(r => 
+    r.name.toUpperCase().includes(keyword)
+  );
 
   if (!role) {
     return interaction.reply({ 
-      content: `⚠️ Role bernama **${roleName}** belum dibuat di Server Settings Discord. Minta admin membuatnya terlebih dahulu.`, 
+      content: `⚠️ Role yang mengandung kata **${keyword}** tidak ditemukan di server. Pastikan nama role di Server Settings sesuai.`, 
       ephemeral: true 
     });
   }
 
   const member = interaction.member;
 
-  // Toggle role: Jika sudah punya maka dihapus, jika belum punya maka ditambahkan
-  if (member.roles.cache.has(role.id)) {
-    await member.roles.remove(role);
-    return interaction.reply({ content: `Role **${role.name}** telah dihapus dari profilmu.`, ephemeral: true });
-  } else {
-    await member.roles.add(role);
-    return interaction.reply({ content: `Role **${role.name}** berhasil ditambahkan ke profilmu!`, ephemeral: true });
+  try {
+    if (member.roles.cache.has(role.id)) {
+      await member.roles.remove(role);
+      return interaction.reply({ 
+        content: `Role **${role.name}** telah dilepas dari profilmu.`, 
+        ephemeral: true 
+      });
+    } else {
+      await member.roles.add(role);
+      return interaction.reply({ 
+        content: `Role **${role.name}** berhasil ditambahkan ke profilmu!`, 
+        ephemeral: true 
+      });
+    }
+  } catch (err) {
+    console.error(err);
+    return interaction.reply({ 
+      content: `❌ Gagal mengatur role. Pastikan posisi role bot berada **di atas** role yang ingin diberikan di Server Settings > Roles.`, 
+      ephemeral: true 
+    });
   }
 });
 
