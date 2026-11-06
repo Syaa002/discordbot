@@ -846,8 +846,9 @@ client.on('messageCreate', async (message) => {
                 `\`${PREFIX}next\` : Tarik otomatis member antrean paling atas dari Ruang Tunggu ke AdminVoice.`
             },
             {
-              name: '🚪 6. Gerbang Server & Keamanan Darurat',
+              name: '🚪 6. Gerbang Server & Layanan Tiket',
               value:
+                `\`${PREFIX}setupticket\` : Buat panel tombol buka tiket bantuan staf di channel ini.\n` +
                 `\`${PREFIX}setupverify\` : Buat panel tombol verifikasi rules (Role CLUB).\n` +
                 `\`${PREFIX}lockdown\` / \`${PREFIX}unlockdown\` : Kunci / buka seluruh channel saat serangan raid darurat.\n` +
                 `\`${PREFIX}lock\` / \`${PREFIX}unlock\` : Kunci / buka channel obrolan saat ini.\n` +
@@ -904,14 +905,9 @@ client.on('messageCreate', async (message) => {
               `\`${PREFIX}rate\` : Buat thread polling rating untuk karya AMV / desain grafis kamu.`
           },
           {
-            name: '🎫 5. Layanan Bantuan Server',
+            name: '🛡️ 5. Menu Terpadu Staf & Moderator',
             value:
-              `\`${PREFIX}setupticket\` : Munculkan panel tiket untuk membuka ruang lapor staf privat.`
-          },
-          {
-            name: '🛡️ 6. Akses Khusus Moderator & Admin',
-            value:
-              `Ketik **\`${PREFIX}help mod\`** untuk membuka seluruh 8 kategori perintah staf (ModPanel, Delete/Clear, Jail, Softban, Voice Control, Alt Detection, dll).`
+              `Ketik **\`${PREFIX}help mod\`** untuk membuka seluruh 8 kategori perintah staf (ModPanel, Setup Ticket, Clear, Jail, Softban, Voice Control, Alt Detection, dll).`
           }
         )
         .setFooter({ text: 'Ambanime Official Bot' })
@@ -2234,15 +2230,54 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      const staffRole = guild.roles.cache.find(r => ['staff', 'admin', 'moderator', 'mod'].includes(r.name.toLowerCase()));
+      // Cari kategori khusus tiket yang sudah ada di server (misal: "REQUEST TICKET")
+      const ticketCategory = guild.channels.cache.find(c => 
+        c.type === ChannelType.GuildCategory && 
+        (c.name.toLowerCase().includes('request ticket') || c.name.toLowerCase().includes('ticket'))
+      );
+
+      // Cari seluruh role staf di server (KING'S, QUEEN'S, JACK, Admin, Moderator, Staff)
+      const staffRoles = guild.roles.cache.filter(r => {
+        const n = r.name.toLowerCase();
+        return n.includes("king's") || n.includes("queen's") || n === 'jack' || 
+               n.includes('staff') || n.includes('admin') || n.includes('moderator') || n.includes('mod');
+      });
+
       const overwrites = [
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: member.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
-        { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory] }
+        { 
+          id: member.id, 
+          allow: [
+            PermissionFlagsBits.ViewChannel, 
+            PermissionFlagsBits.SendMessages, 
+            PermissionFlagsBits.ReadMessageHistory, 
+            PermissionFlagsBits.AttachFiles,
+            PermissionFlagsBits.EmbedLinks
+          ] 
+        },
+        { 
+          id: guild.members.me.id, 
+          allow: [
+            PermissionFlagsBits.ViewChannel, 
+            PermissionFlagsBits.SendMessages, 
+            PermissionFlagsBits.ManageChannels, 
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.ManageMessages
+          ] 
+        }
       ];
 
-      if (staffRole) {
-        overwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] });
+      for (const [, role] of staffRoles) {
+        overwrites.push({
+          id: role.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.ManageMessages,
+            PermissionFlagsBits.AttachFiles
+          ]
+        });
       }
 
       const channelOptions = {
@@ -2252,7 +2287,12 @@ client.on('interactionCreate', async (interaction) => {
         reason: `Tiket bantuan untuk ${interaction.user.tag}`
       };
 
-      if (interaction.channel.parent) channelOptions.parent = interaction.channel.parent;
+      // Arahkan ke kategori REQUEST TICKET yang sudah ada di server
+      if (ticketCategory) {
+        channelOptions.parent = ticketCategory.id;
+      } else if (interaction.channel.parent) {
+        channelOptions.parent = interaction.channel.parent.id;
+      }
 
       const ticketChannel = await guild.channels.create(channelOptions);
       const ticketEmbed = new EmbedBuilder()

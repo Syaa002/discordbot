@@ -15,7 +15,8 @@ Prefix Perintah: **`.`** (Titik) — *juga otomatis merespons prefix `!`*
 
 ---
 
-### 🚪 2. Kategori Akses, Gerbang Server & Verifikasi (Gatekeeping)
+### 🚪 2. Kategori Akses, Gerbang Server & Layanan Tiket (Gatekeeping)
+- **`.setupticket`**: Mengirim panel tombol tiket bantuan resmi staf. Ketika member mengklik **"Buka Tiket"**, channel tiket privat (`#ticket-username`) otomatis dibuat rapi di dalam kategori **`REQUEST TICKET`** yang sudah ada di server, dan hanya bisa diakses oleh pelapor serta jajaran Staf (`KING'S`, `QUEEN'S`, `JACK`, Admin/Mod).
 - **`.setupverify`**: Mengirim panel verifikasi rules. Member baru menekan tombol untuk mengambil role **`CLUB`**, yang secara otomatis membuka akses seluruh channel kategori `COMMUNITY`.
 - **`.lockdown` & `.unlockdown`**: Mengunci seluruh channel obrolan server secara instan saat terjadi serangan/raid darurat, dan membukanya kembali setelah situasi aman.
 - **`.syncperms [#channel]`**: Menyamakan izin (*permissions*) suatu channel dengan kategori induknya secara otomatis.
