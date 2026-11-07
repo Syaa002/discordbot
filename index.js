@@ -406,7 +406,8 @@ client.once('ready', async () => {
   }
 
   // ==========================================
-  // JADWAL PENGINGAT RENEW KE DM PRIBADI OWNER (Setiap Hari Pukul 12:00 WIB)
+  // JADWAL PENGINGAT RENEW KE DM PRIBADI OWNER (Setiap 3 Hari Sekali Pukul 12:00 WIB)
+  // Format cron: 0 12 */3 * * (Menit 0, Jam 12, Setiap 3 Hari)
   // ==========================================
   async function sendRenewNotification(source = 'Otomatis') {
     try {
@@ -440,9 +441,9 @@ client.once('ready', async () => {
         .setTitle('⏰ PENGINGAT PRIBADI: RENEW BOT-HOSTING')
         .setDescription(
           `Halo **${targetUser.username}**!\n\n` +
-          'Ini adalah pengingat harian untuk mengecek sisa masa aktif server bot di **Bot-Hosting.net**.\n\n' +
+          'Ini adalah pengingat berkala (setiap 3 hari sekali) untuk mengecek masa aktif bot di **Bot-Hosting.net**.\n\n' +
           '⚠️ **Server gratis wajib di-renew setiap 4 hari sekali.**\n' +
-          'Segera buka dashboard dan klik tombol **Renew / Extend** agar bot tetap menyala.'
+          'Segera buka dashboard dan klik tombol **Renew / Extend** agar bot tetap aktif dan tidak mati otomatis.'
         )
         .setColor(0xFEE75C)
         .addFields(
@@ -458,12 +459,12 @@ client.once('ready', async () => {
     }
   }
 
-  // Penjadwalan: Jika library cron ada gunakan cron, jika tidak ada gunakan timer internal Node.js
+  // Penjadwalan: Setiap 3 hari sekali pukul 12:00 WIB
   if (cron) {
-    cron.schedule('0 12 * * *', () => sendRenewNotification('Harian (Cron)'), {
+    cron.schedule('0 12 */3 * *', () => sendRenewNotification('3 Hari Sekali (Cron)'), {
       timezone: "Asia/Jakarta"
     });
-    console.log('⏰ Penjadwal Renew: Menggunakan node-cron (Setiap 12:00 WIB)');
+    console.log('⏰ Penjadwal Renew: Menggunakan node-cron (Setiap 3 hari sekali pukul 12:00 WIB)');
   } else {
     let lastNotifiedDay = -1;
     setInterval(() => {
@@ -472,13 +473,13 @@ client.once('ready', async () => {
       const utcHours = now.getUTCHours();
       const utcMinutes = now.getUTCMinutes();
 
-      // 12:00 WIB = 05:00 UTC
-      if (utcHours === 5 && utcMinutes === 0 && lastNotifiedDay !== currentDay) {
+      // Jam 12:00 WIB = 05:00 UTC (Setiap tanggal habis dibagi 3: 3, 6, 9, 12, dst.)
+      if (utcHours === 5 && utcMinutes === 0 && (currentDay % 3 === 0) && lastNotifiedDay !== currentDay) {
         lastNotifiedDay = currentDay;
-        sendRenewNotification('Harian (Native Timer)');
+        sendRenewNotification('3 Hari Sekali (Native Timer)');
       }
     }, 60 * 1000);
-    console.log('⏰ Penjadwal Renew: Menggunakan timer native Node.js (Setiap 12:00 WIB)');
+    console.log('⏰ Penjadwal Renew: Menggunakan timer native Node.js (Setiap 3 hari sekali pukul 12:00 WIB)');
   }
 });
 
