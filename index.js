@@ -212,6 +212,33 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
+// Generator Berkas Transkrip Teks Bersih (Bisa dibuka langsung di HP & PC via Discord Viewer)
+function generateTextTranscript(channelName, guildName, messages, closedByTag, ownerDisplay) {
+  let text = `=====================================================\n`;
+  text += `TRANSKRIP TIKET: #${channelName}\n`;
+  text += `Server: ${guildName}\n`;
+  text += `Pembuat Tiket: ${ownerDisplay}\n`;
+  text += `Ditutup Oleh: ${closedByTag}\n`;
+  text += `Waktu Selesai: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB\n`;
+  text += `Total Pesan: ${messages.length} pesan\n`;
+  text += `=====================================================\n\n`;
+
+  for (const msg of messages) {
+    const time = new Date(msg.createdTimestamp).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+    const author = msg.author?.tag || 'Pengguna';
+    const content = msg.content || '';
+    let attachments = '';
+    if (msg.attachments && msg.attachments.size > 0) {
+      attachments = ' [Lampiran: ' + msg.attachments.map(a => a.url).join(', ') + ']';
+    }
+    text += `[${time}] ${author}:\n${content || '[Hanya berkas/lampiran]'}${attachments}\n\n`;
+  }
+
+  text += `=====================================================\n`;
+  text += `Akhir dari transkrip obrolan tiket.\n`;
+  return text;
+}
+
 // Generator Berkas Transkrip HTML Modern (Format Discord Dark Theme)
 function generateHtmlTranscript(channelName, guildName, messages, closedByTag, ownerMention) {
   const messageRows = messages.map(msg => {
@@ -2502,7 +2529,7 @@ client.on('interactionCreate', async (interaction) => {
       const participantSet = new Set(fetchedMessages.map(m => `<@${m.author.id}>`));
       const participants = Array.from(participantSet).slice(0, 10).join(', ') || `<@${interaction.user.id}>`;
 
-      // Buat file transkrip HTML
+      // 1. Buat file transkrip HTML modern (bisa dibuka di browser)
       const htmlContent = generateHtmlTranscript(
         channelName,
         guild.name,
@@ -2510,10 +2537,33 @@ client.on('interactionCreate', async (interaction) => {
         interaction.user.tag,
         ticketOwnerId ? `<@${ticketOwnerId}>` : channelName
       );
-
       const transcriptFile = new AttachmentBuilder(Buffer.from(htmlContent, 'utf-8'), {
         name: `transcript-${channelName}.html`
       });
+
+      // 2. Buat file transkrip TXT bersih (bisa langsung dibuka di dalam aplikasi Discord tanpa download)
+      const textContent = generateTextTranscript(
+        channelName,
+        guild.name,
+        fetchedMessages,
+        interaction.user.tag,
+        ownerDisplay
+      );
+      const transcriptTextFile = new AttachmentBuilder(Buffer.from(textContent, 'utf-8'), {
+        name: `transcript-${channelName}.txt`
+      });
+
+      // 3. Ringkasan obrolan langsung (preview di chat agar tidak perlu klik apa-apa untuk membaca)
+      let chatPreview = '';
+      const previewSlice = fetchedMessages.filter(m => m.content && !m.author?.bot).slice(-6);
+      if (previewSlice.length > 0) {
+        chatPreview = previewSlice.map(m => {
+          const time = new Date(m.createdTimestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+          const name = m.author?.username || 'User';
+          const cleanContent = m.content.length > 60 ? m.content.substring(0, 57) + '...' : m.content;
+          return `\`[${time}]\` **${name}**: ${cleanContent}`;
+        }).join('\n');
+      }
 
       const transcriptEmbed = new EmbedBuilder()
         .setTitle('📑 Transkrip Tiket Bantuan Ditutup')
@@ -2523,9 +2573,15 @@ client.on('interactionCreate', async (interaction) => {
           { name: 'Pembuat Tiket', value: ownerDisplay, inline: true },
           { name: 'Ditutup Oleh', value: `${interaction.user.tag} (<@${interaction.user.id}>)`, inline: true },
           { name: 'Total Pesan', value: `**${fetchedMessages.length}** pesan`, inline: true },
-          { name: 'Partisipan', value: participants },
-          { name: 'Waktu Ditutup', value: `<t:${Math.floor(Date.now() / 1000)}:F>` }
-        )
+          { name: 'Partisipan', value: participants, inline: true },
+          { name: 'Direct Transcript', value: 'Klik tombol **Buka Transkrip** di bawah untuk membaca langsung.' }
+        );
+
+      if (chatPreview) {
+        transcriptEmbed.addFields({ name: '💬 Intisari Obrolan (Preview Langsung)', value: chatPreview });
+      }
+
+      transcriptEmbed
         .setFooter({ text: 'Ambanime Ticket System • Transkrip Tersimpan' })
         .setTimestamp();
 
@@ -2535,24 +2591,57 @@ client.on('interactionCreate', async (interaction) => {
       ) || guild.channels.cache.find(c => c.isTextBased() && c.name.toLowerCase() === LOG_CHANNEL_NAME);
 
       if (transcriptLogChannel) {
-        await transcriptLogChannel.send({
+        const sentLogMsg = await transcriptLogChannel.send({
           embeds: [transcriptEmbed],
-          files: [transcriptFile]
-        }).catch(e => console.error('Gagal kirim transkrip ke transcript-log:', e));
-      }
+          files: [transcriptFile, transcriptTextFile]
+        }).catch(e => {
+          console.error('Gagal kirim transkrip ke transcript-log:', e);
+          return null;
+        });
 
-      // Kirim salinan transkrip ke DM pembuat tiket jika memungkinkan
-      if (ticketOwnerId) {
-        try {
-          const ownerUser = await client.users.fetch(ticketOwnerId).catch(() => null);
-          if (ownerUser) {
-            await ownerUser.send({
-              content: `Halo <@${ticketOwnerId}>! Tiket bantuan Anda (**#${channelName}**) telah selesai dan ditutup oleh staf. Berikut adalah salinan berkas transkrip obrolan Anda:`,
-              embeds: [transcriptEmbed],
-              files: [transcriptFile]
-            }).catch(() => {});
+        if (sentLogMsg) {
+          const directHtmlUrl = sentLogMsg.attachments.find(a => a.name.endsWith('.html'))?.url;
+          const directTxtUrl = sentLogMsg.attachments.find(a => a.name.endsWith('.txt'))?.url;
+
+          const actionRow = new ActionRowBuilder();
+          if (directHtmlUrl) {
+            actionRow.addComponents(
+              new ButtonBuilder()
+                .setLabel('Buka Transkrip (Direct Link)')
+                .setEmoji('🌐')
+                .setStyle(ButtonStyle.Link)
+                .setURL(directHtmlUrl)
+            );
           }
-        } catch (e) {}
+          if (directTxtUrl) {
+            actionRow.addComponents(
+              new ButtonBuilder()
+                .setLabel('Buka Teks Langsung')
+                .setEmoji('📄')
+                .setStyle(ButtonStyle.Link)
+                .setURL(directTxtUrl)
+            );
+          }
+
+          if (actionRow.components.length > 0) {
+            await sentLogMsg.edit({ components: [actionRow] }).catch(() => {});
+          }
+
+          // Kirim salinan transkrip ke DM pembuat tiket beserta tombol Direct Link
+          if (ticketOwnerId) {
+            try {
+              const ownerUser = await client.users.fetch(ticketOwnerId).catch(() => null);
+              if (ownerUser) {
+                await ownerUser.send({
+                  content: `Halo <@${ticketOwnerId}>! Tiket bantuan Anda (**#${channelName}**) telah selesai dan ditutup oleh staf. Berikut adalah salinan berkas transkrip obrolan Anda yang bisa langsung dibuka:`,
+                  embeds: [transcriptEmbed],
+                  files: [transcriptFile, transcriptTextFile],
+                  components: actionRow.components.length > 0 ? [actionRow] : []
+                }).catch(() => {});
+              }
+            } catch (e) {}
+          }
+        }
       }
 
       recordModStat(interaction.user.id, 'ticket');
