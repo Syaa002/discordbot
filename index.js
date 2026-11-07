@@ -2626,21 +2626,6 @@ client.on('interactionCreate', async (interaction) => {
           if (actionRow.components.length > 0) {
             await sentLogMsg.edit({ components: [actionRow] }).catch(() => {});
           }
-
-          // Kirim salinan transkrip ke DM pembuat tiket beserta tombol Direct Link
-          if (ticketOwnerId) {
-            try {
-              const ownerUser = await client.users.fetch(ticketOwnerId).catch(() => null);
-              if (ownerUser) {
-                await ownerUser.send({
-                  content: `Halo <@${ticketOwnerId}>! Tiket bantuan Anda (**#${channelName}**) telah selesai dan ditutup oleh staf. Berikut adalah salinan berkas transkrip obrolan Anda yang bisa langsung dibuka:`,
-                  embeds: [transcriptEmbed],
-                  files: [transcriptFile, transcriptTextFile],
-                  components: actionRow.components.length > 0 ? [actionRow] : []
-                }).catch(() => {});
-              }
-            } catch (e) {}
-          }
         }
       }
 
